@@ -454,6 +454,19 @@ static int cmd_consume(Rocker *r, DescInfo *info)
         world = r->worlds[ROCKER_WORLD_TYPE_OF_DPA];
         err = world_do_cmd(world, info, buf, cmd, info_tlv);
         break;
+    case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SC:
+    case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SA:
+    case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SC:
+    case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SA:
+    case ROCKER_TLV_CMD_TYPE_SECY_INSTALL_SAK:
+    case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SC:
+    case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SA:
+    case ROCKER_TLV_CMD_TYPE_SECY_DEL_RX_SC:
+    case ROCKER_TLV_CMD_TYPE_SECY_DEL_RX_SA:
+    case ROCKER_TLV_CMD_TYPE_SECY_DEL:
+        world = r->worlds[ROCKER_WORLD_TYPE_SECY];
+        err = world_do_cmd(world, info, buf, cmd, info_tlv);
+        break;
     case ROCKER_TLV_CMD_TYPE_GET_PORT_SETTINGS:
         err = cmd_get_port_settings(r, info, buf, info_tlv);
         break;

@@ -21,6 +21,7 @@
 
 enum rocker_world_type {
     ROCKER_WORLD_TYPE_OF_DPA = ROCKER_PORT_MODE_OF_DPA,
+    ROCKER_WORLD_TYPE_SECY,
     ROCKER_WORLD_TYPE_MAX,
 };
 
