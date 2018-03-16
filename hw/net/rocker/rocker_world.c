@@ -36,6 +36,17 @@ ssize_t world_ingress(World *world, uint32_t pport,
     return -1;
 }
 
+int world_egress(World *world, uint32_t pport,
+                 const struct iovec *iov, int iovcnt,
+                 struct iovec *new_iov, int *new_iovcnt)
+{
+    if (world->ops->eg) {
+        return world->ops->eg(world, pport, iov, iovcnt, new_iov, new_iovcnt);
+    }
+
+    return 0;
+}
+
 int world_do_cmd(World *world, DescInfo *info,
                  char *buf, uint16_t cmd, RockerTlv *cmd_info_tlv)
 {

@@ -117,9 +117,22 @@ bool fp_port_from_pport(uint32_t pport, uint32_t *port)
 
 int fp_port_eg(FpPort *port, const struct iovec *iov, int iovcnt)
 {
+    struct iovec *new_iov = NULL;
+    int new_iovcnt;
+
     NetClientState *nc = qemu_get_queue(port->nic);
 
-    if (port->enabled) {
+    if (!port->enabled) {
+        return -1;
+    }
+
+    if (world_egress(port->world, port->pport, iov, iovcnt, new_iov, &new_iovcnt)) {
+        return -1;
+    }
+
+    if (new_iov) {
+        qemu_sendv_packet(nc, new_iov, new_iovcnt);
+    } else {
         qemu_sendv_packet(nc, iov, iovcnt);
     }
 
