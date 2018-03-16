@@ -29,6 +29,9 @@ typedef int (world_init)(World *world);
 typedef void (world_uninit)(World *world);
 typedef ssize_t (world_ig)(World *world, uint32_t pport,
                            const struct iovec *iov, int iovcnt);
+typedef int (world_eg)(World *world, uint32_t pport,
+                       const struct iovec *iov, int iovcnt,
+                       struct iovec *new_iov, int *new_iovcnt);
 typedef int (world_cmd)(World *world, DescInfo *info,
                         char *buf, uint16_t cmd,
                         RockerTlv *cmd_info_tlv);
@@ -38,11 +41,15 @@ typedef struct world_ops {
     world_init *init;
     world_uninit *uninit;
     world_ig *ig;
+    world_eg *eg;
     world_cmd *cmd;
 } WorldOps;
 
 ssize_t world_ingress(World *world, uint32_t pport,
                       const struct iovec *iov, int iovcnt);
+int world_egress(World *world, uint32_t pport,
+                 const struct iovec *iov, int iovcnt,
+                 struct iovec *new_iov, int *new_iovcnt);
 int world_do_cmd(World *world, DescInfo *info,
                  char *buf, uint16_t cmd, RockerTlv *cmd_info_tlv);
 
