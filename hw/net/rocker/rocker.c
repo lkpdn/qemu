@@ -33,6 +33,7 @@
 #include "rocker_tlv.h"
 #include "rocker_world.h"
 #include "rocker_of_dpa.h"
+#include "rocker_secy.h"
 
 struct rocker {
     /* private */
@@ -1308,6 +1309,7 @@ static void pci_rocker_realize(PCIDevice *dev, Error **errp)
     /* allocate worlds */
 
     r->worlds[ROCKER_WORLD_TYPE_OF_DPA] = of_dpa_world_alloc(r);
+    r->worlds[ROCKER_WORLD_TYPE_SECY] = secy_world_alloc(r);
 
     if (!r->world_name) {
         r->world_name = g_strdup(world_name(r->worlds[ROCKER_WORLD_TYPE_OF_DPA]));
