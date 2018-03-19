@@ -20,6 +20,7 @@
 #include "qemu/iov.h"
 #include "qemu/timer.h"
 #include "qmp-commands.h"
+#include "crypto/cipher.h"
 
 #include "rocker.h"
 #include "rocker_hw.h"
@@ -49,11 +50,8 @@ typedef struct ki {
 typedef struct sak {
     ki_t ki;
     bool transmits;
-    bool receives;
-
     int64_t created_time;
-
-    char *key;
+    QCryptoCipher *cipher;
 } SAK;
 
 typedef struct sci_table {
@@ -66,6 +64,8 @@ typedef struct sci_table {
      */
     GHashTable *tbl;
     unsigned int tbl_max_size;
+
+    SecY *secys[64];
 } SCITable;
 
 typedef struct provided_interface {
@@ -106,6 +106,8 @@ typedef struct tx_sc {
     SCCommon sc_common;
 
     bool transmitting;
+
+    uint8_t encoding_sa;
     struct tx_sa *txa[MACSEC_NUM_AN];
 } TxSC;
 
@@ -235,6 +237,67 @@ static LgPortOps secy_lg_ops = {
 };
 
 /*
+ * For secure frame generation/validation
+ */
+typedef enum {
+    MACSEC_CIPHER_ID_GCM_AES_128,
+    MACSEC_CIPHER_ID_GCM_AES_256,
+} MACsec_Cipher_Id;
+
+static QCryptoCipher *alloc_cipher_context(MACsec_Cipher_Id cipher_id,
+                                           uint8_t *key)
+{
+    Error *err = NULL;
+    size_t nkey;
+    int alg, mode;
+
+    switch (cipher_id) {
+    case MACSEC_CIPHER_ID_GCM_AES_128:
+        alg = QCRYPTO_CIPHER_ALG_AES_128;
+        mode = QCRYPTO_CIPHER_MODE_CBC; /* fool */
+        break;
+    case MACSEC_CIPHER_ID_GCM_AES_256:
+        alg = QCRYPTO_CIPHER_ALG_AES_256;
+        mode = QCRYPTO_CIPHER_MODE_CBC; /* fool */
+        break;
+    }
+
+    nkey = qcrypto_cipher_get_key_len(alg);
+
+    return qcrypto_cipher_new(alg, mode, key, nkey, &err);
+}
+
+static uint8_t *fill_iv(SecY *secy, uint8_t *iv)
+{
+    uint8_t an;
+    uint32_t pn;
+
+    assert(sizeof(iv) == 12);
+    an = secy->tx_sc->encoding_sa;
+    pn = secy->tx_sc->txa[an]->sa_common.next_pn;
+
+    iv[0] = cpu_to_be64(secy->sci);
+    iv[8] = cpu_to_be32(pn);
+}
+
+static int do_encrypt(uint8_t *src, uint8_t *dst, size_t src_size,
+                      const uint8_t *iv, size_t iv_len,
+                      QCryptoCipher *cipher)
+{
+    Error *err = NULL;
+    int ret;
+
+    if (qcrypto_cipher_setiv(cipher, iv, iv_len, &err))
+        return -ROCKER_SECY_CRYPTO_ERR;
+
+    ret = qcrypto_cipher_encrypt(cipher, src, dst, src_size, &err);
+    if (ret < 0)
+        return -ROCKER_SECY_CRYPTO_ERR;
+
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+/*
  * SC manipulations
  */
 static TxSC *txsc_find(SCITable *sci_table, sci_t sci)
@@ -334,6 +397,8 @@ static SecY *secy_alloc(SCITable *sci_table, sci_t sci, uint32_t pport)
     port = lg_port_alloc(0, NULL, pport, &secy_lg_ops);
     secy->vport.lg_port = port;
 
+    sci_table->secys[pport] = secy;
+
     return secy;
 }
 
@@ -355,7 +420,8 @@ static void secy_del_sc(SCITable *tbl, sci_t sci)
     rxsc_del(tbl, sci);
 }
 
-static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn)
+static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn,
+                       MACsec_Cipher_Id cipher_id, uint8_t *sak, uint8_t *ki)
 {
     TxSC *tx_sc;
     RxSC *rx_sc;
@@ -377,7 +443,7 @@ static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn)
         rx_sc->rxa[an] = rx_sa;
     }
 
-    /* TODO: need SAK */
+    alloc_cipher_context(cipher_id, sak);
 
     return 0;
 }
@@ -414,6 +480,14 @@ static void secy_drop(struct secy_context *ctx)
 static int secy_decrypt(struct secy_context *ctx)
 {
     return 0;
+}
+
+static int secy_encrypt(struct secy_context *ctx, SecY *secy)
+{
+    uint8_t iv[12];
+
+    fill_iv(secy, iv);
+    return do_encrypt(NULL, NULL, 0, iv, 12, NULL);
 }
 
 static void c_port_rx(struct secy_context *ctx)
@@ -483,20 +557,25 @@ static ssize_t secy_ig(World *world, uint32_t pport,
     return iov_size(iov, iovcnt);
 }
 
-static int secy_install_sak(SCITable *tbl, sci_t sci, int an, char *key)
+static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 {
+    QCryptoCipher *cipher;
     TxSC *tx_sc;
     RxSC *rx_sc;
 
+    cipher = alloc_cipher_context(MACSEC_CIPHER_ID_GCM_AES_128, key);
+
     tx_sc = txsc_find(tbl, sci);
     if (tx_sc) {
-        tx_sc->txa[an]->sa_common.sak.key = key;
+        tx_sc->txa[an]->sa_common.sak.transmits = true;
+        tx_sc->txa[an]->sa_common.sak.cipher = cipher;
         return 0;
     }
 
     rx_sc = rxsc_find(tbl, sci);
     if (rx_sc) {
-        rx_sc->rxa[an]->sa_common.sak.key = key;
+        tx_sc->txa[an]->sa_common.sak.transmits = false;
+        rx_sc->rxa[an]->sa_common.sak.cipher = cipher;
     }
 
     return 0;
@@ -558,6 +637,8 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     uint8_t an;
     uint32_t pn;
 
+    MACsec_Cipher_Id cipher_id;
+
     if (!tlvs[ROCKER_TLV_SECY_SCI] ||
         !tlvs[ROCKER_TLV_SECY_AN] ||
         !tlvs[ROCKER_TLV_SECY_PN]) {
@@ -568,10 +649,12 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     an = (sci_t)rocker_tlv_get_u8(tlvs[ROCKER_TLV_SECY_AN]);
     pn = (sci_t)rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_PN]);
 
+    cipher_id = MACSEC_CIPHER_ID_GCM_AES_128;
+
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SA:
-        secy_add_sa(tbl, sci, an, pn);
+        secy_add_sa(tbl, sci, an, pn, cipher_id, NULL, NULL);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_RX_SA:
@@ -585,7 +668,7 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 static int secy_sak_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 {
     sci_t sci;
-    char *sak;
+    uint8_t *sak;
     int an;
 
     if (!tlvs[ROCKER_TLV_SECY_SCI] ||
@@ -596,7 +679,7 @@ static int secy_sak_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 
     sci = (sci_t)tlvs[ROCKER_TLV_SECY_SCI];
     an = rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_AN]);
-    sak = (char *)rocker_tlv_data(tlvs[ROCKER_TLV_SECY_SAK]);
+    sak = (uint8_t *)rocker_tlv_data(tlvs[ROCKER_TLV_SECY_SAK]);
 
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_INSTALL_SAK:

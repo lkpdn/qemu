@@ -17,6 +17,9 @@
 #ifndef ROCKER_SECY_H
 #define ROCKER_SECY_H
 
+#define ROCKER_SECY_CRYPTO_OK  0
+#define ROCKER_SECY_CRYPTO_ERR 1
+
 World *secy_world_alloc(Rocker *r);
 
 #endif /* ROCKER_SECY_H */
