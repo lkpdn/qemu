@@ -557,6 +557,35 @@ static ssize_t secy_ig(World *world, uint32_t pport,
     return iov_size(iov, iovcnt);
 }
 
+/* 'Controlled Port (Secure Service Access Point)' TX request
+ * reception. pport identifies the associated 'Common Port'.
+ */
+static int secy_eg(World *world, uint32_t pport,
+                   const struct iovec *iov, int iovcnt,
+                   struct iovec *new_iov, int *new_iovcnt)
+{
+    SCITable *sci_table = world_private(world);
+
+    int i;
+    struct iovec iov_copy[iovcnt];
+
+    /* TODO: vlan tag insertion on Virtual Port if needed */
+    for (i = 0; i < iovcnt; i++) {
+        iov_copy[i] = iov[i];
+    }
+
+    SecYContext ctx = {
+        .out_pport = pport,
+        .iov = iov_copy,
+        .iovcnt = iovcnt,
+        .sci_table = sci_table,
+    };
+
+    SecY *secy = sci_table->secys[pport];
+    secy_encrypt(&ctx, secy);
+    return 0;
+}
+
 static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 {
     QCryptoCipher *cipher;
