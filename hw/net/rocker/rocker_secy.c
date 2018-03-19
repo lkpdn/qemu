@@ -20,6 +20,8 @@
 #include "qemu/iov.h"
 #include "qemu/timer.h"
 #include "qmp-commands.h"
+#include "crypto/aead.h"
+#include "crypto/cipher.h"
 
 #include "rocker.h"
 #include "rocker_hw.h"
@@ -49,11 +51,8 @@ typedef struct ki {
 typedef struct sak {
     ki_t ki;
     bool transmits;
-    bool receives;
-
     int64_t created_time;
-
-    char *key;
+    QCryptoAead *cipher;
 } SAK;
 
 typedef struct sci_table {
@@ -66,6 +65,8 @@ typedef struct sci_table {
      */
     GHashTable *tbl;
     unsigned int tbl_max_size;
+
+    SecY *secys[64];
 } SCITable;
 
 typedef struct provided_interface {
@@ -106,6 +107,8 @@ typedef struct tx_sc {
     SCCommon sc_common;
 
     bool transmitting;
+
+    uint8_t encoding_sa;
     struct tx_sa *txa[MACSEC_NUM_AN];
 } TxSC;
 
@@ -151,12 +154,24 @@ typedef struct secy {
     QLIST_HEAD(, CipherSuite) ciphersuites;
 } SecY;
 
+#pragma pack(push, 1)
+typedef struct sectag {
+    uint8_t tci_an;
+    uint8_t short_len;
+    __be32 pn;
+    __be64 sci;
+} SecTAG;
+#pragma pack(pop)
+
 typedef struct secy_context {
     uint32_t in_pport;
     uint32_t out_pport;
     struct iovec *iov;
     int iovcnt;
     SCITable *sci_table;
+    SecY *secy;
+    SACommon *sa;
+    SecTAG *sectag;
 } SecYContext;
 
 /*
@@ -233,6 +248,196 @@ static LgPortOps secy_lg_ops = {
     .free = secy_lg_free,
     .reset = secy_lg_reset,
 };
+
+/*
+ * For secure frame generation/validation
+ */
+typedef enum {
+    MACSEC_CIPHER_ID_GCM_AES_128,
+    MACSEC_CIPHER_ID_GCM_AES_256,
+} MACsec_Cipher_Id;
+
+static QCryptoAead *alloc_cipher_context(MACsec_Cipher_Id cipher_id,
+                                         uint8_t *key)
+{
+    Error *err = NULL;
+    size_t nkey;
+    int alg, mode;
+
+    switch (cipher_id) {
+    case MACSEC_CIPHER_ID_GCM_AES_128:
+        alg = QCRYPTO_CIPHER_ALG_AES_128;
+        mode = QCRYPTO_CIPHER_MODE_GCM;
+        break;
+    case MACSEC_CIPHER_ID_GCM_AES_256:
+        alg = QCRYPTO_CIPHER_ALG_AES_256;
+        mode = QCRYPTO_CIPHER_MODE_GCM;
+        break;
+    }
+
+    nkey = qcrypto_cipher_get_key_len(alg);
+
+    return qcrypto_aead_new(alg, mode, key, nkey, &err);
+}
+
+static int set_nonce(SecY *secy, SecYContext *ctx)
+{
+    uint8_t an;
+    uint32_t pn;
+    uint8_t iv[12];
+    size_t tag_len;
+    Error *err = NULL;
+
+    tag_len = 8; /* XXX */
+    an = secy->tx_sc->encoding_sa;
+    pn = secy->tx_sc->txa[an]->sa_common.next_pn;
+
+    iv[0] = cpu_to_be64(secy->sci);
+    iv[8] = cpu_to_be32(pn);
+
+    if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, 12, ctx->iov[0].iov_len,
+                               ctx->iov[1].iov_len, tag_len, &err)) {
+        return -ROCKER_SECY_CRYPTO_ERR;
+    }
+
+    if (qcrypto_aead_authenticate(ctx->sa->sak.cipher, ctx->iov[0].iov_base,
+                                  ctx->iov[0].iov_len, &err)) {
+        return -ROCKER_SECY_CRYPTO_ERR;
+    }
+
+    return 0;
+}
+
+static int do_decrypt(SecYContext *ctx)
+{
+    int ret;
+    uint8_t iv[8]; /* XXX */
+    struct iovec out_iovec;
+    size_t sec_len, tag_len;
+    Error *err = NULL;
+
+    sec_len = ctx->iov[1].iov_len;
+    tag_len = ctx->iov[2].iov_len;
+
+    out_iovec.iov_base = g_malloc(sec_len + tag_len);
+    out_iovec.iov_len  = sec_len + tag_len;
+
+    ret = qcrypto_aead_decrypt(ctx->sa->sak.cipher, ctx->iov[1].iov_base,
+                               sec_len + tag_len, out_iovec.iov_base,
+                               sec_len + tag_len, &err);
+    if (ret) {
+        goto err_out;
+    }
+
+    ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher, out_iovec.iov_base + sec_len,
+                               tag_len, &err);
+    if (ret) {
+        goto err_out;
+    }
+
+    iv[0] = cpu_to_be64(ctx->secy->sci);
+    iv[8] = cpu_to_be32(ctx->sa->next_pn);
+    if (memcmp(out_iovec.iov_base + sec_len, iv, 8)) {
+        goto err_out;
+    }
+
+    g_free(ctx->iov[1].iov_base);
+    ctx->iov[1].iov_base = out_iovec.iov_base;
+    ctx->iov[1].iov_len = sec_len;
+
+    return -ROCKER_SECY_CRYPTO_OK;
+
+err_out:
+    error_report_err(err);
+    g_free(out_iovec.iov_base);
+    return -ROCKER_SECY_CRYPTO_ERR;
+}
+
+static int do_encrypt(SecYContext *ctx)
+{
+    int ret;
+    int sec_len, tag_len;
+    struct iovec out_iovec;
+    Error *err = NULL;
+
+    sec_len = ctx->iov[1].iov_len;
+    tag_len = 8; /* XXX */
+
+    out_iovec.iov_base = g_malloc(sec_len + tag_len);
+    out_iovec.iov_len  = sec_len + tag_len;
+
+    ret = qcrypto_aead_encrypt(ctx->sa->sak.cipher, ctx->iov[1].iov_base,
+                               sec_len, out_iovec.iov_base,
+                               sec_len + tag_len, &err);
+    if (ret) {
+        goto err_out;
+    }
+
+    ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher,
+                               out_iovec.iov_base + sec_len, tag_len, &err);
+    if (ret) {
+        goto err_out;
+    }
+
+    g_free(ctx->iov[1].iov_base);
+    ctx->iov[1].iov_base = out_iovec.iov_base;
+
+    return ROCKER_SECY_CRYPTO_OK;
+
+err_out:
+    error_report_err(err);
+    g_free(out_iovec.iov_base);
+    return -ROCKER_SECY_CRYPTO_ERR;
+}
+
+static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
+                    SecY *secy)
+{
+    static SecTAG sectag;
+    int i, remaining, copy, cur;
+    void *pos;
+
+    cur = 0;
+
+    ctx->iov[0].iov_base = g_malloc(sizeof(struct eth_header) +
+                                    sizeof(SecTAG));
+
+    /* move DA/SA and append SecTAG including ET */
+    pos = ctx->iov[0].iov_base;
+    remaining = 12;
+    for (i = 0; i < iovcnt; i++) {
+        if (iov[i].iov_len > remaining)
+            copy = remaining;
+        else
+            copy = iov[i].iov_len;
+
+        memcpy(pos, iov[i].iov_base, copy);
+        pos += copy;
+        ctx->iov[0].iov_len += copy;
+        remaining -= copy;
+
+        if (!remaining)
+            break;
+
+        cur += 1;
+    }
+
+    if (remaining)
+        return -1;
+
+    for (i = 3; cur < iovcnt; cur++) {
+        ctx->iov[i].iov_base = iov[cur].iov_base;
+        ctx->iov[i].iov_len = iov[cur].iov_len;
+    }
+
+    memcpy(pos, &sectag, sizeof(sectag));
+
+    /* vlan tag insertion may occur */
+    ctx->iov[1].iov_base = pos + sizeof(sectag);
+    ctx->iov[1].iov_len = 0;
+
+    return 0;
+}
 
 /*
  * SC manipulations
@@ -334,6 +539,8 @@ static SecY *secy_alloc(SCITable *sci_table, sci_t sci, uint32_t pport)
     port = lg_port_alloc(0, NULL, pport, &secy_lg_ops);
     secy->vport.lg_port = port;
 
+    sci_table->secys[pport] = secy;
+
     return secy;
 }
 
@@ -356,8 +563,10 @@ static void secy_del_sc(SCITable *tbl, sci_t sci)
     rxsc_del(tbl, sci);
 }
 
-static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn)
+static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn,
+                       MACsec_Cipher_Id cipher_id, uint8_t *key, uint8_t *ki)
 {
+    SAK *sak;
     TxSC *tx_sc;
     RxSC *rx_sc;
     TxSA *tx_sa;
@@ -372,13 +581,15 @@ static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn)
         tx_sa = g_new0(TxSA, 1);
         tx_sa->sa_common.next_pn = pn;
         tx_sc->txa[an] = tx_sa;
+        sak = &tx_sc->txa[an]->sa_common.sak;
     } else {
         rx_sa = g_new0(RxSA, 1);
         rx_sa->sa_common.next_pn = pn;
         rx_sc->rxa[an] = rx_sa;
+        sak = &rx_sc->rxa[an]->sa_common.sak;
     }
 
-    /* TODO: need SAK */
+    sak->cipher = alloc_cipher_context(cipher_id, key);
 
     return 0;
 }
@@ -414,7 +625,19 @@ static void secy_drop(struct secy_context *ctx)
 
 static int secy_decrypt(struct secy_context *ctx)
 {
-    return 0;
+    return do_decrypt(ctx);
+}
+
+static int secy_encrypt(struct secy_context *ctx, SecY *secy)
+{
+    int ret;
+
+    ret = set_nonce(secy, ctx);
+
+    if (ret)
+        return ret;
+
+    return do_encrypt(ctx);
 }
 
 static void c_port_rx(struct secy_context *ctx)
@@ -457,9 +680,64 @@ static void u_port_rx(struct secy_context *ctx, const struct iovec *iov,
     rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
 }
 
-static int parse_sectag(struct secy_context *ctx)
+static int parse_sectag(struct secy_context *ctx,
+                        const struct iovec *iov, int iovcnt)
 {
-    return 1;
+    SecTAG *sectag = ctx->sectag;
+    struct eth_header *ethhdr;
+    size_t sofar = 0;
+    int i;
+
+    sofar += sizeof(struct eth_header);
+    if (iov->iov_len < sofar) {
+        DPRINTF("parse_sectag underrun on eth_header\n");
+        return -1;
+    }
+
+    ethhdr = iov->iov_base;
+    if (ethhdr->h_proto != ETH_P_MACSEC) {
+        return -1;
+    }
+
+    sofar += sizeof(SecTAG);
+    if (iov->iov_len < sofar) {
+        DPRINTF("parse_sectag underrun on SecTAG without SCI\n");
+        return -1;
+    }
+
+    sectag = (SecTAG *)(ethhdr + 1);
+
+    if (sectag->tci_an & ROCKER_SECY_TCI_BIT_VERSION) {
+        return -1;
+    }
+    if (sectag->tci_an & ROCKER_SECY_TCI_BIT_ES &&
+        !(sectag->tci_an & ROCKER_SECY_TCI_BIT_SC)) {
+        memcpy(&sectag->sci, ethhdr->h_source, ETH_ALEN);
+        if (!(sectag->tci_an & ROCKER_SECY_TCI_BIT_SCB)) {
+            sectag->sci[7] = 1; /* port id = 0x01 */
+        }
+    } else if (iov->iov_len < sofar + 8) {
+        DPRINTF("parse_sectag underrun on SecTAG SCI\n");
+        return -1;
+    } else if (sectag->tci_an & ROCKER_SECY_TCI_BIT_ES ||
+               !(sectag->tci_an & ROCKER_SECY_TCI_BIT_SC) ||
+               sectag->tci_an & ROCKER_SECY_TCI_BIT_SCB) {
+        DPRINTF("parse_sectag invalid TCI\n");
+        return -1;
+    }
+
+    sofar += 8;
+
+    ctx->iov[2].iov_base = iov[0].iov_base + sofar;
+    ctx->iov[2].iov_len = iov[0].iov_len - sofar;
+
+    for (i = 1; i < iovcnt; i++) {
+        ctx->iov[i+2] = iov[i];
+    }
+
+    ctx->iovcnt = iovcnt + 2;
+
+    return 0;
 }
 
 /* 'Common Port' ingress */
@@ -468,22 +746,16 @@ static ssize_t secy_ig(World *world, uint32_t pport,
 {
     SCITable *sci_table = world_private(world);
 
-    int i;
-    struct iovec iov_copy[iovcnt];
-
-    /* TODO: vlan tag insertion on Virtual Port if needed */
-    for (i = 0; i < iovcnt; i++) {
-        iov_copy[i] = iov[i];
-    }
+    struct iovec iov_copy[iovcnt + 2];
 
     SecYContext ctx = {
         .in_pport = pport,
         .iov = iov_copy,
-        .iovcnt = iovcnt,
+        .iovcnt = iovcnt + 2,
         .sci_table = sci_table,
     };
 
-    if (parse_sectag(&ctx)) {
+    if (parse_sectag(&ctx, iov, iovcnt)) {
         u_port_rx(&ctx, iov, iovcnt);
         return iov_size(iov, iovcnt);
     }
@@ -522,26 +794,28 @@ static int secy_eg(World *world, uint32_t pport,
     };
 
     SecY *secy = sci_table->secys[pport];
+    fill_ctx(&ctx, iov, iovcnt, secy);
     secy_encrypt(&ctx, secy);
     return 0;
 }
 
 static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 {
+    SAK *sak;
     TxSC *tx_sc;
     RxSC *rx_sc;
 
-    tx_sc = txsc_find(tbl, sci);
-    if (tx_sc) {
-        tx_sc->txa[an]->sa_common.sak.key = key;
-        return 0;
+    if ((tx_sc = txsc_find(tbl, sci)) != NULL) {
+        sak = &tx_sc->txa[an]->sa_common.sak;
+        sak->transmits = true;
+    } else if ((rx_sc = rxsc_find(tbl, sci)) != NULL) {
+        sak = &rx_sc->rxa[an]->sa_common.sak;
+        sak->transmits = false;
+    } else {
+        return -1;
     }
 
-    rx_sc = rxsc_find(tbl, sci);
-    if (rx_sc) {
-        rx_sc->rxa[an]->sa_common.sak.key = key;
-    }
-
+    sak->cipher = alloc_cipher_context(MACSEC_CIPHER_ID_GCM_AES_128, key);
     return 0;
 }
 
@@ -601,6 +875,8 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     uint8_t an;
     uint32_t pn;
 
+    MACsec_Cipher_Id cipher_id;
+
     if (!tlvs[ROCKER_TLV_SECY_SCI] ||
         !tlvs[ROCKER_TLV_SECY_AN] ||
         !tlvs[ROCKER_TLV_SECY_PN]) {
@@ -611,10 +887,12 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     an = (sci_t)rocker_tlv_get_u8(tlvs[ROCKER_TLV_SECY_AN]);
     pn = (sci_t)rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_PN]);
 
+    cipher_id = MACSEC_CIPHER_ID_GCM_AES_128;
+
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SA:
-        secy_add_sa(tbl, sci, an, pn);
+        secy_add_sa(tbl, sci, an, pn, cipher_id, NULL, NULL);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_RX_SA:
@@ -628,7 +906,7 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 static int secy_sak_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 {
     sci_t sci;
-    char *sak;
+    uint8_t *sak;
     int an;
 
     if (!tlvs[ROCKER_TLV_SECY_SCI] ||
@@ -639,7 +917,7 @@ static int secy_sak_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 
     sci = (sci_t)tlvs[ROCKER_TLV_SECY_SCI];
     an = rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_AN]);
-    sak = (char *)rocker_tlv_data(tlvs[ROCKER_TLV_SECY_SAK]);
+    sak = (uint8_t *)rocker_tlv_data(tlvs[ROCKER_TLV_SECY_SAK]);
 
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_INSTALL_SAK:
