@@ -485,7 +485,34 @@ static ssize_t secy_ig(World *world, uint32_t pport,
     return iov_size(iov, iovcnt);
 }
 
-static int secy_install_sak(SCITable *tbl, sci_t sci, int an, char *key)
+/* 'Controlled Port (Secure Service Access Point)' TX request
+ * reception. pport identifies the associated 'Common Port'.
+ */
+static int secy_eg(World *world, uint32_t pport,
+                   const struct iovec *iov, int iovcnt,
+                   struct iovec *new_iov, int *new_iovcnt)
+{
+    SCITable *sci_table = world_private(world);
+
+    /* Two iovecs headroom for ether header + SECTAG and possibly vlan
+     * tag which will be not-in-the-clear on wire, and one iovec ICV
+     * in tailroom.
+     */
+    struct iovec iov_copy[iovcnt + 3];
+
+    SecYContext ctx = {
+        .out_pport = pport,
+        .iov = iov_copy,
+        .iovcnt = iovcnt,
+        .sci_table = sci_table,
+    };
+
+    SecY *secy = sci_table->secys[pport];
+    secy_encrypt(&ctx, secy);
+    return 0;
+}
+
+static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 {
     TxSC *tx_sc;
     RxSC *rx_sc;
@@ -675,6 +702,7 @@ static WorldOps secy_ops = {
     .name = "secy",
     .init = secy_init,
     .uninit = secy_uninit,
+    .eg = secy_eg,
     .ig = secy_ig,
     .cmd = secy_cmd,
 };
