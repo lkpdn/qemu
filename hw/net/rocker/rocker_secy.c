@@ -420,9 +420,18 @@ static int secy_decrypt(struct secy_context *ctx)
 static void c_port_rx(struct secy_context *ctx)
 {
     if (ctx->out_pport == 0) {
+        /* Deliver to the higher layer entities (LLC), which is facing bridge
+         * port TX/RX over secure ISS, and the way these packets will be
+         * handled in the control plane is symmetrical in virtue of newly
+         * introduced world_egress intervention. This design choice enables
+         * us to make use of various kinds of higher layer entities over the
+         * secure channel, e.g. BPDU to the STP Entity. So, we forcefully set
+         * offload_fwd_mark when that processing happen on control plane Linux.
+         */
         rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov,
                    ctx->iovcnt, 1);
     } else if (ctx->out_pport != ctx->in_pport) {
+        /* Maybe SecY protection on out_pport happens later on fp_port_eg. */
         rocker_port_eg(world_rocker(ctx->sci_table->world), ctx->out_pport,
                        ctx->iov, ctx->iovcnt);
     }
@@ -431,14 +440,19 @@ static void c_port_rx(struct secy_context *ctx)
 static void u_port_rx(struct secy_context *ctx, const struct iovec *iov,
                       int iovcnt)
 {
-    /* To always deliver BPDU to the STP Entity, we deliver to CPU-side while
-     * forcefully setting offload_fwd_mark. That takes care of the situation
-     * where for some reason, we cease to or fail to offload "authorized" forwarding.
-     *
-     * This is okay since it helps CPU-side kernel MACsec processing step forward,
-     * hence the next time the retransmitted packet will be received with its
-     * PN being set to the same value, Controlled Port should have being successfully
-     * functioning as expected.
+    /* This RX takes care of the case where for some reason, we cease to or
+     * fail to offload "authorized" forwarding, plus Uncontrolled port-attached
+     * higher entity.
+     * In the former case, this is okay since it helps CPU-side kernel MACsec
+     * processing step forward and recover when the retransmitted packet will
+     * be received with its PN (Packet Number) being set to the same.
+     */
+
+    /* BIG TODOs:
+     * 1). to filter out or not EAPOL frames with group destination MAC.
+     * 2). we should provide admin interface which turns on or off the
+     *     Unauthorized VLANs (IEEE 802.1X-2010 7.5.3). about the Selective
+     *     Relay like WoL, see secy_eg().
      */
     rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
 }
