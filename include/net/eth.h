@@ -208,7 +208,9 @@ struct tcp_hdr {
 #define ETH_P_ARP                 (0x0806)      /* Address Resolution packet */
 #define ETH_P_IPV6                (0x86dd)
 #define ETH_P_VLAN                (0x8100)
+#define ETH_P_PAE                 (0x888E)
 #define ETH_P_DVLAN               (0x88a8)
+#define ETH_P_MACSEC              (0x88e5)
 #define ETH_P_NCSI                (0x88f8)
 #define ETH_P_UNKNOWN             (0xffff)
 #define VLAN_VID_MASK             0x0fff
