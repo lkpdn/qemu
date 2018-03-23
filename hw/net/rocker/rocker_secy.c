@@ -663,20 +663,51 @@ static void c_port_rx(struct secy_context *ctx)
 static void u_port_rx(struct secy_context *ctx, const struct iovec *iov,
                       int iovcnt)
 {
-    /* This RX takes care of the case where for some reason, we cease to or
-     * fail to offload "authorized" forwarding, plus Uncontrolled port-attached
-     * higher entity.
-     * In the former case, this is okay since it helps CPU-side kernel MACsec
-     * processing step forward and recover when the retransmitted packet will
-     * be received with its PN (Packet Number) being set to the same.
+    struct eth_header *ethhdr;
+    /* TODO: we should provide admin interface which turns on or off the
+     * Unauthorized VLANs (IEEE 802.1X-2010 7.5.3). about the Selective
+     * Relay like WoL, see secy_eg().
      */
 
-    /* BIG TODOs:
-     * 1). to filter out or not EAPOL frames with group destination MAC.
-     * 2). we should provide admin interface which turns on or off the
-     *     Unauthorized VLANs (IEEE 802.1X-2010 7.5.3). about the Selective
-     *     Relay like WoL, see secy_eg().
+    if (iov->iov_len < sizeof(struct eth_header)) {
+        return;
+    }
+
+    ethhdr = iov->iov_base;
+    if (ntohs(ethhdr->h_proto) == ETH_P_MACSEC) {
+        /* In the case that for some reason we cease to or failt ro offload
+         * "authorized" forwarding, this helps CPU-side kernel MACsec processing
+         * step forward and recover when the retransmitted packet will be
+         * received with its PN (Packet Number) being set to the same. */
+        goto local_rcv;
+    }
+
+    /* per IEEE 802.1D, IEEE 802.1Q connectivity scope, EAPOL scope defaults
+     * to TPMR-transparent, but anyway we are MAC Bridge/VLAN Bridge, not even
+     * Provider Bridge nor Provider Backbone Bridge.
      */
+    if (((eth_reserved_addr_base[0] ^ ethhdr->h_dest[0]) |
+         (eth_reserved_addr_base[1] ^ ethhdr->h_dest[1]) |
+         (eth_reserved_addr_base[2] ^ ethhdr->h_dest[2]) |
+         (eth_reserved_addr_base[3] ^ ethhdr->h_dest[3]) |
+         (eth_reserved_addr_base[4] ^ ethhdr->h_dest[4])) != 0) {
+        return;
+    }
+
+    if (ntohs(ethhdr->h_proto) != ETH_P_PAE) {
+        goto local_rcv;
+    }
+
+    switch (ethhdr->h_dest[5]) {
+    case 0x00: /* Bridge Group Address */
+    case 0x03: /* PAE Group Address */
+    case 0x0E: /* LLDP Multicast Address */
+        break;
+    default:
+        return;
+    }
+
+local_rcv:
     rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
 }
 
