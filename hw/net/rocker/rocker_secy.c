@@ -802,8 +802,18 @@ static ssize_t secy_ig(World *world, uint32_t pport,
     return iov_size(iov, iovcnt);
 }
 
-/* 'Controlled Port (Secure Service Access Point)' TX request
- * reception. pport identifies the associated 'Common Port'.
+/* 'Common Port' egress
+ *
+ * Note: Not only 'Controlled Port (Secure Service Access Point)' TX request
+ * reception, but also includes 'Uncontrolled Port' TX. Control plane Linux
+ * iproute2 utility may transparently deploy Virtual Ports and we handle them
+ * to achieve multi-Access LAN interface stack transparently, thus we cannot
+ * permit SecTAG-omitted frame transmitted by 'Uncontrolled Port'. To permit
+ * bi-directional unicast communication with SecTAG being omitted only while
+ * just one SecY Virtual Port is present for a front-panel port would probably
+ * confuse the peer station.
+ *
+ * pport identifies the associated 'Common Port'.
  */
 static int secy_eg(World *world, uint32_t pport,
                    const struct iovec *iov, int iovcnt,
