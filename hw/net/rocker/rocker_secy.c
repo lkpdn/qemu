@@ -65,8 +65,6 @@ typedef struct sci_table {
      */
     GHashTable *tbl;
     unsigned int tbl_max_size;
-
-    SecY *secys[64];
 } SCITable;
 
 typedef struct provided_interface {
@@ -172,6 +170,9 @@ typedef struct secy_context {
     SecY *secy;
     SACommon *sa;
     SecTAG *sectag;
+    bool processing_sec;
+    bool processing_icv;
+    sci_t sci;
 } SecYContext;
 
 /*
@@ -316,8 +317,8 @@ static int do_decrypt(SecYContext *ctx)
     size_t sec_len, tag_len;
     Error *err = NULL;
 
-    sec_len = ctx->iov[1].iov_len;
-    tag_len = ctx->iov[2].iov_len;
+    sec_len = ctx->iov[1].iov_len - 16;
+    tag_len = 16;
 
     out_iovec.iov_base = g_malloc(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
@@ -391,20 +392,18 @@ err_out:
 }
 
 static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
-                    SecY *secy)
+                    SecY *secy, int data_offset)
 {
-    static SecTAG sectag;
     int i, remaining, copy, cur;
     void *pos;
 
     cur = 0;
 
-    ctx->iov[0].iov_base = g_malloc(sizeof(struct eth_header) +
-                                    sizeof(SecTAG));
+    ctx->iov[0].iov_base = g_malloc(data_offset);
 
     /* move DA/SA and append SecTAG including ET */
     pos = ctx->iov[0].iov_base;
-    remaining = 12;
+    remaining = data_offset;
     for (i = 0; i < iovcnt; i++) {
         if (iov[i].iov_len > remaining)
             copy = remaining;
@@ -425,16 +424,15 @@ static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
     if (remaining)
         return -1;
 
-    for (i = 3; cur < iovcnt; cur++) {
-        ctx->iov[i].iov_base = iov[cur].iov_base;
-        ctx->iov[i].iov_len = iov[cur].iov_len;
+    /* TODO: vlan tag insertion may occur */
+    for (i = 1; cur < iovcnt; cur++, i++) {
+        ctx->iov[i].iov_base = iov[cur].iov_base + copy;
+        ctx->iov[i].iov_len = iov[cur].iov_len - copy;
+        copy = 0;
     }
 
-    memcpy(pos, &sectag, sizeof(sectag));
-
-    /* vlan tag insertion may occur */
-    ctx->iov[1].iov_base = pos + sizeof(sectag);
-    ctx->iov[1].iov_len = 0;
+    ctx->iovcnt = i;
+    ctx->iov[i - 1].iov_base = g_malloc(8); /* XXX */
 
     return 0;
 }
@@ -538,8 +536,6 @@ static SecY *secy_alloc(SCITable *sci_table, sci_t sci, uint32_t pport)
 
     port = lg_port_alloc(0, NULL, pport, &secy_lg_ops);
     secy->vport.lg_port = port;
-
-    sci_table->secys[pport] = secy;
 
     return secy;
 }
@@ -711,43 +707,28 @@ local_rcv:
     rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
 }
 
-static int parse_sectag(struct secy_context *ctx,
-                        const struct iovec *iov, int iovcnt)
+static size_t
+validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
+                size_t remaining, SecYContext *ctx)
 {
-    SecTAG *sectag = ctx->sectag;
-    struct eth_header *ethhdr;
-    size_t sofar = 0;
-    int i;
-
-    sofar += sizeof(struct eth_header);
-    if (iov->iov_len < sofar) {
-        DPRINTF("parse_sectag underrun on eth_header\n");
-        return -1;
-    }
-
-    ethhdr = iov->iov_base;
-    if (ethhdr->h_proto != ETH_P_MACSEC) {
-        return -1;
-    }
-
-    sofar += sizeof(SecTAG);
-    if (iov->iov_len < sofar) {
-        DPRINTF("parse_sectag underrun on SecTAG without SCI\n");
-        return -1;
-    }
-
-    sectag = (SecTAG *)(ethhdr + 1);
+    size_t sectag_len;
 
     if (sectag->tci_an & ROCKER_SECY_TCI_BIT_VERSION) {
         return -1;
     }
     if (sectag->tci_an & ROCKER_SECY_TCI_BIT_ES &&
         !(sectag->tci_an & ROCKER_SECY_TCI_BIT_SC)) {
-        memcpy(&sectag->sci, ethhdr->h_source, ETH_ALEN);
+        ctx->sci = (sci_t)ethhdr->h_source[0] << 56 |
+                   (sci_t)ethhdr->h_source[1] << 48 |
+                   (sci_t)ethhdr->h_source[2] << 40 |
+                   (sci_t)ethhdr->h_source[3] << 32 |
+                   (sci_t)ethhdr->h_source[4] << 24 |
+                   (sci_t)ethhdr->h_source[5] << 16;
         if (!(sectag->tci_an & ROCKER_SECY_TCI_BIT_SCB)) {
-            sectag->sci[7] = 1; /* port id = 0x01 */
+            ctx->sci |= 1; /* port id = 0x01 */
         }
-    } else if (iov->iov_len < sofar + 8) {
+        sectag_len = sizeof(SecTAG);
+    } else if (sizeof(sci_t) > remaining) {
         DPRINTF("parse_sectag underrun on SecTAG SCI\n");
         return -1;
     } else if (sectag->tci_an & ROCKER_SECY_TCI_BIT_ES ||
@@ -755,20 +736,74 @@ static int parse_sectag(struct secy_context *ctx,
                sectag->tci_an & ROCKER_SECY_TCI_BIT_SCB) {
         DPRINTF("parse_sectag invalid TCI\n");
         return -1;
+    } else {
+        sci_t sci = ntohs(sectag->sci);
+        memcpy(&ctx->sci, &sci, sizeof(sci_t));
+        sectag_len = sizeof(SecTAG) + 8;
     }
 
-    sofar += 8;
-
-    ctx->iov[2].iov_base = iov[0].iov_base + sofar;
-    ctx->iov[2].iov_len = iov[0].iov_len - sofar;
-
-    for (i = 1; i < iovcnt; i++) {
-        ctx->iov[i+2] = iov[i];
+    switch (sectag->tci_an &
+            (ROCKER_SECY_TCI_BIT_E|ROCKER_SECY_TCI_BIT_C) >> 2) {
+    case 0x00:
+        /* Normal case where neighther confidentiality nor integrity are being
+         * provided. This potentially includes the case where not the default
+         * Cipher Suite may provide integrity with appended ICV. However we do
+         * not have such an interface, thus no need to check whether or not
+         * the packet has sufficient tailroom for 16 bit ICV.
+         */
+        break;
+    case 0x01:
+        /* This indicates not the default Cipher Suite is being used,
+         * and requires it to be preconfigured. Currently we do not
+         * support that administrative interface. */
+        return -1;
+    case 0x02:
+        /* Reserved for KaY processing, and distinguishable even in multi-access
+         * LAN environment with multiple Virtual Ports. See IEEE 802.1AE-2006
+         * 11.8. */
+        break;
+    case 0x03:
+        /* Normal case */
+        ctx->processing_sec = true;
+        ctx->processing_icv = true;
+        break;
     }
 
-    ctx->iovcnt = iovcnt + 2;
+    return sectag_len;
+}
 
-    return 0;
+static size_t
+parse_sectag(struct secy_context *ctx, const struct iovec *iov)
+{
+    SecTAG *sectag = ctx->sectag;
+    struct eth_header *ethhdr;
+    size_t remaining, sofar = 0;
+    int sectag_len;
+
+    sofar += sizeof(struct eth_header);
+    if (iov->iov_len < sofar) {
+        DPRINTF("parse_sectag underrun on eth_header\n");
+        return -1;
+    }
+    ethhdr = iov->iov_base;
+    if (ntohs(ethhdr->h_proto) != ETH_P_MACSEC) {
+        return -1;
+    }
+
+    sofar += sizeof(SecTAG);
+    remaining = iov->iov_len - sofar;
+    if (iov->iov_len < sofar) {
+        DPRINTF("parse_sectag underrun on SecTAG without SCI\n");
+        return -1;
+    }
+    sectag = (SecTAG *)(ethhdr + 1);
+    sectag_len = validate_sectag(ethhdr, sectag, remaining, ctx);
+    if (sectag_len < 0) {
+        return -1;
+    }
+
+    sofar += sectag_len;
+    return sofar;
 }
 
 /* 'Common Port' ingress */
@@ -776,6 +811,9 @@ static ssize_t secy_ig(World *world, uint32_t pport,
                        const struct iovec *iov, int iovcnt)
 {
     SCITable *sci_table = world_private(world);
+    RxSC *rxsc;
+    SecY *secy;
+    int data_offset;
 
     struct iovec iov_copy[iovcnt + 2];
 
@@ -786,10 +824,27 @@ static ssize_t secy_ig(World *world, uint32_t pport,
         .sci_table = sci_table,
     };
 
-    if (parse_sectag(&ctx, iov, iovcnt)) {
+    data_offset = parse_sectag(&ctx, iov);
+
+    if (data_offset < 0) {
+        return 0;
+    }
+
+    if (!ctx.processing_sec) {
         u_port_rx(&ctx, iov, iovcnt);
         return iov_size(iov, iovcnt);
     }
+
+    rxsc = rxsc_find(sci_table, ctx.sci);
+    if (!rxsc) {
+        return -1;
+    }
+    secy = rxsc->sc_common.secy;
+    if (!secy) {
+        return -1;
+    }
+
+    fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
 
     if (secy_decrypt(&ctx)) {
         secy_drop(&ctx);
@@ -820,6 +875,9 @@ static int secy_eg(World *world, uint32_t pport,
                    struct iovec *new_iov, int *new_iovcnt)
 {
     SCITable *sci_table = world_private(world);
+    TxSC *txsc;
+    SecY *secy;
+    int data_offset;
 
     /* Two iovecs headroom for ether header + SECTAG and possibly vlan
      * tag which will be not-in-the-clear on wire, and one iovec ICV
@@ -834,8 +892,25 @@ static int secy_eg(World *world, uint32_t pport,
         .sci_table = sci_table,
     };
 
-    SecY *secy = sci_table->secys[pport];
-    fill_ctx(&ctx, iov, iovcnt, secy);
+    data_offset = parse_sectag(&ctx, iov);
+
+    if (data_offset < 0) {
+        return -1;
+    }
+
+    if (!ctx.processing_sec) {
+        return 0;
+    }
+
+    txsc = txsc_find(sci_table, ctx.sci);
+    if (!txsc) {
+        return -1;
+    }
+    secy = txsc->sc_common.secy;
+    if (!secy) {
+        return -1;
+    }
+    fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
     secy_encrypt(&ctx, secy);
     return 0;
 }
