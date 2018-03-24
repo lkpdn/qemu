@@ -36,12 +36,14 @@
 #define MI_LEN 12
 
 typedef uint64_t sci_t;
+typedef uint64_t cipher_id_t;
 
 typedef struct secy SecY;
 typedef struct sc SC;
 typedef struct tx_sc TxSC;
 typedef struct rx_sc RxSC;
 typedef struct sak SAK;
+typedef struct ciphersuite CipherSuite;
 
 typedef struct ki {
     uint8_t mi[MI_LEN];
@@ -127,15 +129,6 @@ typedef struct rx_sc {
     QLIST_ENTRY(rx_sc) next;
 } RxSC;
 
-typedef struct ciphersuite {
-    uint64_t id;
-    char *name;
-    bool integrity_protection;
-    bool confidentiality_protection;
-    bool changed_data_len;
-    int icv_len;
-} CipherSuite;
-
 typedef struct secy {
     World *world;
     uint32_t pport;
@@ -149,7 +142,6 @@ typedef struct secy {
     TxSC *tx_sc;
 
     CipherSuite *current_ciphersuite;
-    QLIST_HEAD(, CipherSuite) ciphersuites;
 } SecY;
 
 #pragma pack(push, 1)
@@ -174,6 +166,17 @@ typedef struct secy_context {
     bool processing_icv;
     sci_t sci;
 } SecYContext;
+
+typedef struct ciphersuite {
+    uint64_t id;
+    const char *name;
+    bool integrity_protection;
+    bool confidentiality_protection;
+    int icv_len;
+    int (*set_nonce)(CipherSuite *cs, SecY *secy, SecYContext *ctx);
+    int (*decrypt)(CipherSuite *cs, SecYContext *ctx);
+    int (*encrypt)(CipherSuite *cs, SecYContext *ctx);
+} CipherSuite;
 
 /*
  * MACsec Virtual Ports Manipulations
@@ -253,35 +256,7 @@ static LgPortOps secy_lg_ops = {
 /*
  * For secure frame generation/validation
  */
-typedef enum {
-    MACSEC_CIPHER_ID_GCM_AES_128,
-    MACSEC_CIPHER_ID_GCM_AES_256,
-} MACsec_Cipher_Id;
-
-static QCryptoAead *alloc_cipher_context(MACsec_Cipher_Id cipher_id,
-                                         uint8_t *key)
-{
-    Error *err = NULL;
-    size_t nkey;
-    int alg, mode;
-
-    switch (cipher_id) {
-    case MACSEC_CIPHER_ID_GCM_AES_128:
-        alg = QCRYPTO_CIPHER_ALG_AES_128;
-        mode = QCRYPTO_CIPHER_MODE_GCM;
-        break;
-    case MACSEC_CIPHER_ID_GCM_AES_256:
-        alg = QCRYPTO_CIPHER_ALG_AES_256;
-        mode = QCRYPTO_CIPHER_MODE_GCM;
-        break;
-    }
-
-    nkey = qcrypto_cipher_get_key_len(alg);
-
-    return qcrypto_aead_new(alg, mode, key, nkey, &err);
-}
-
-static int set_nonce(SecY *secy, SecYContext *ctx)
+static int gcm_aes_128_set_nonce(CipherSuite *cs, SecY *secy, SecYContext *ctx)
 {
     uint8_t an;
     uint32_t pn;
@@ -289,7 +264,7 @@ static int set_nonce(SecY *secy, SecYContext *ctx)
     size_t tag_len;
     Error *err = NULL;
 
-    tag_len = 8; /* XXX */
+    tag_len = cs->icv_len;
     an = secy->tx_sc->encoding_sa;
     pn = secy->tx_sc->txa[an]->sa_common.next_pn;
 
@@ -309,7 +284,7 @@ static int set_nonce(SecY *secy, SecYContext *ctx)
     return 0;
 }
 
-static int do_decrypt(SecYContext *ctx)
+static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
     uint8_t iv[8]; /* XXX */
@@ -317,8 +292,8 @@ static int do_decrypt(SecYContext *ctx)
     size_t sec_len, tag_len;
     Error *err = NULL;
 
-    sec_len = ctx->iov[1].iov_len - 16;
-    tag_len = 16;
+    tag_len = cs->icv_len;
+    sec_len = ctx->iov[1].iov_len - tag_len;
 
     out_iovec.iov_base = g_malloc(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
@@ -354,7 +329,7 @@ err_out:
     return -ROCKER_SECY_CRYPTO_ERR;
 }
 
-static int do_encrypt(SecYContext *ctx)
+static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
     int sec_len, tag_len;
@@ -362,7 +337,7 @@ static int do_encrypt(SecYContext *ctx)
     Error *err = NULL;
 
     sec_len = ctx->iov[1].iov_len;
-    tag_len = 8; /* XXX */
+    tag_len = cs->icv_len;
 
     out_iovec.iov_base = g_malloc(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
@@ -389,6 +364,50 @@ err_out:
     error_report_err(err);
     g_free(out_iovec.iov_base);
     return -ROCKER_SECY_CRYPTO_ERR;
+}
+
+static CipherSuite ciphersuites[] = { {
+    .id                         = 0x0080020001000001,
+    .name                       = "GCM-AES-128",
+    .integrity_protection       = true,
+    .confidentiality_protection = true,
+    .icv_len                    = 16,
+    .set_nonce                  = gcm_aes_128_set_nonce,
+    .decrypt                    = gcm_aes_128_decrypt,
+    .encrypt                    = gcm_aes_128_encrypt,
+} };
+
+static CipherSuite *find_ciphersuite(cipher_id_t cipher_id)
+{
+    int i, count;
+    CipherSuite *cs;
+
+    count = ARRAY_SIZE(ciphersuites);
+    for (i = 0; i < count; i++) {
+        cs = &ciphersuites[i];
+        return cs;
+    }
+    return NULL;
+}
+
+static QCryptoAead *alloc_cipher_context(cipher_id_t cipher_id,
+                                         uint8_t *key)
+{
+    Error *err = NULL;
+    size_t nkey;
+    int alg, mode;
+    CipherSuite *cs;
+
+    cs = find_ciphersuite(cipher_id);
+    if (cs) {
+        DPRINTF("Cipher Suite \"%s\" is initialised.\n", cs->name);
+        alg = QCRYPTO_CIPHER_ALG_AES_128;
+        mode = QCRYPTO_CIPHER_MODE_GCM;
+        nkey = qcrypto_cipher_get_key_len(alg);
+        return qcrypto_aead_new(alg, mode, key, nkey, &err);
+    }
+
+    return NULL;
 }
 
 static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
@@ -537,6 +556,9 @@ static SecY *secy_alloc(SCITable *sci_table, sci_t sci, uint32_t pport)
     port = lg_port_alloc(0, NULL, pport, &secy_lg_ops);
     secy->vport.lg_port = port;
 
+    secy->current_ciphersuite = find_ciphersuite(
+                    ROCKER_SECY_DEFAULT_CIPHERSUITE);
+
     return secy;
 }
 
@@ -560,9 +582,10 @@ static void secy_del_sc(SCITable *tbl, sci_t sci)
 }
 
 static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn,
-                       MACsec_Cipher_Id cipher_id, uint8_t *key, uint8_t *ki)
+                       uint8_t *key, uint8_t *ki)
 {
     SAK *sak;
+    SecY *secy;
     TxSC *tx_sc;
     RxSC *rx_sc;
     TxSA *tx_sa;
@@ -574,18 +597,20 @@ static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn,
         return 0; /* may i return an error */
 
     if (tx_sc) {
+        secy = tx_sc->sc_common.secy;
         tx_sa = g_new0(TxSA, 1);
         tx_sa->sa_common.next_pn = pn;
         tx_sc->txa[an] = tx_sa;
         sak = &tx_sc->txa[an]->sa_common.sak;
     } else {
+        secy = rx_sc->sc_common.secy;
         rx_sa = g_new0(RxSA, 1);
         rx_sa->sa_common.next_pn = pn;
         rx_sc->rxa[an] = rx_sa;
         sak = &rx_sc->rxa[an]->sa_common.sak;
     }
 
-    sak->cipher = alloc_cipher_context(cipher_id, key);
+    sak->cipher = alloc_cipher_context(secy->current_ciphersuite->id, key);
 
     return 0;
 }
@@ -621,19 +646,23 @@ static void secy_drop(struct secy_context *ctx)
 
 static int secy_decrypt(struct secy_context *ctx)
 {
-    return do_decrypt(ctx);
+    CipherSuite *cs = ctx->secy->current_ciphersuite;
+
+    return cs->decrypt(cs, ctx);
 }
 
 static int secy_encrypt(struct secy_context *ctx, SecY *secy)
 {
     int ret;
+    CipherSuite *ciphersuite = secy->current_ciphersuite;
 
-    ret = set_nonce(secy, ctx);
-
-    if (ret)
-        return ret;
-
-    return do_encrypt(ctx);
+    if (ciphersuite->set_nonce) {
+        ret = ciphersuite->set_nonce(ciphersuite, secy, ctx);
+        if (ret) {
+            return ret;
+        }
+    }
+    return ciphersuite->encrypt(ciphersuite, ctx);
 }
 
 static void c_port_rx(struct secy_context *ctx)
@@ -918,20 +947,23 @@ static int secy_eg(World *world, uint32_t pport,
 static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 {
     SAK *sak;
+    SecY *secy;
     TxSC *tx_sc;
     RxSC *rx_sc;
 
     if ((tx_sc = txsc_find(tbl, sci)) != NULL) {
+        secy = tx_sc->sc_common.secy;
         sak = &tx_sc->txa[an]->sa_common.sak;
         sak->transmits = true;
     } else if ((rx_sc = rxsc_find(tbl, sci)) != NULL) {
+        secy = rx_sc->sc_common.secy;
         sak = &rx_sc->rxa[an]->sa_common.sak;
         sak->transmits = false;
     } else {
         return -1;
     }
 
-    sak->cipher = alloc_cipher_context(MACSEC_CIPHER_ID_GCM_AES_128, key);
+    sak->cipher = alloc_cipher_context(secy->current_ciphersuite->id, key);
     return 0;
 }
 
@@ -991,8 +1023,6 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     uint8_t an;
     uint32_t pn;
 
-    MACsec_Cipher_Id cipher_id;
-
     if (!tlvs[ROCKER_TLV_SECY_SCI] ||
         !tlvs[ROCKER_TLV_SECY_AN] ||
         !tlvs[ROCKER_TLV_SECY_PN]) {
@@ -1003,12 +1033,10 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     an = (sci_t)rocker_tlv_get_u8(tlvs[ROCKER_TLV_SECY_AN]);
     pn = (sci_t)rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_PN]);
 
-    cipher_id = MACSEC_CIPHER_ID_GCM_AES_128;
-
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SA:
-        secy_add_sa(tbl, sci, an, pn, cipher_id, NULL, NULL);
+        secy_add_sa(tbl, sci, an, pn, NULL, NULL);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_RX_SA:
