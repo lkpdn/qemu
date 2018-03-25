@@ -855,11 +855,7 @@ static ssize_t secy_ig(World *world, uint32_t pport,
 
     data_offset = parse_sectag(&ctx, iov);
 
-    if (data_offset < 0) {
-        return 0;
-    }
-
-    if (!ctx.processing_sec) {
+    if (data_offset < 0 || !ctx.processing_sec) {
         u_port_rx(&ctx, iov, iovcnt);
         return iov_size(iov, iovcnt);
     }
@@ -924,24 +920,35 @@ static int secy_eg(World *world, uint32_t pport,
     data_offset = parse_sectag(&ctx, iov);
 
     if (data_offset < 0) {
-        return -1;
+        struct eth_header *ethhdr;
+        if (iov->iov_len < sizeof(struct eth_header)) {
+            return -ROCKER_EINVAL;
+        }
+        ethhdr = iov->iov_base;
+        if (((eth_reserved_addr_base[0] ^ ethhdr->h_dest[0]) |
+             (eth_reserved_addr_base[1] ^ ethhdr->h_dest[1]) |
+             (eth_reserved_addr_base[2] ^ ethhdr->h_dest[2]) |
+             (eth_reserved_addr_base[3] ^ ethhdr->h_dest[3]) |
+             (eth_reserved_addr_base[4] ^ ethhdr->h_dest[4])) != 0) {
+            return ROCKER_OK;
+        }
     }
 
     if (!ctx.processing_sec) {
-        return 0;
+        return ROCKER_OK;
     }
 
     txsc = txsc_find(sci_table, ctx.sci);
     if (!txsc) {
-        return -1;
+        return -ROCKER_EINVAL;
     }
     secy = txsc->sc_common.secy;
     if (!secy) {
-        return -1;
+        return -ROCKER_EINVAL;
     }
     fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
     secy_encrypt(&ctx, secy);
-    return 0;
+    return ROCKER_OK;
 }
 
 static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
