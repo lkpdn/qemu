@@ -665,33 +665,14 @@ static int secy_encrypt(struct secy_context *ctx, SecY *secy)
     return ciphersuite->encrypt(ciphersuite, ctx);
 }
 
-static void c_port_rx(struct secy_context *ctx)
-{
-    if (ctx->out_pport == 0) {
-        /* Deliver to the higher layer entities (LLC), which is facing bridge
-         * port TX/RX over secure ISS, and the way these packets will be
-         * handled in the control plane is symmetrical in virtue of newly
-         * introduced world_egress intervention. This design choice enables
-         * us to make use of various kinds of higher layer entities over the
-         * secure channel, e.g. BPDU to the STP Entity. So, we forcefully set
-         * offload_fwd_mark when that processing happen on control plane Linux.
-         */
-        rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov,
-                   ctx->iovcnt, 1);
-    } else if (ctx->out_pport != ctx->in_pport) {
-        /* Maybe SecY protection on out_pport happens later on fp_port_eg. */
-        rocker_port_eg(world_rocker(ctx->sci_table->world), ctx->out_pport,
-                       ctx->iov, ctx->iovcnt);
-    }
-}
-
-static void u_port_rx(struct secy_context *ctx, const struct iovec *iov,
-                      int iovcnt)
+static void secy_ig(SecY *secy, SecYContext *ctx,
+                    const struct iovec *iov, int iovcnt, int data_offset)
 {
     struct eth_header *ethhdr;
+
     /* TODO: we should provide admin interface which turns on or off the
      * Unauthorized VLANs (IEEE 802.1X-2010 7.5.3). about the Selective
-     * Relay like WoL, see secy_eg().
+     * Relay like WoL, see secy_world_eg().
      */
 
     if (iov->iov_len < sizeof(struct eth_header)) {
@@ -699,41 +680,39 @@ static void u_port_rx(struct secy_context *ctx, const struct iovec *iov,
     }
 
     ethhdr = iov->iov_base;
-    if (ntohs(ethhdr->h_proto) == ETH_P_MACSEC) {
-        /* In the case that for some reason we cease to or failt ro offload
-         * "authorized" forwarding, this helps CPU-side kernel MACsec processing
-         * step forward and recover when the retransmitted packet will be
-         * received with its PN (Packet Number) being set to the same. */
-        goto local_rcv;
-    }
-
-    /* per IEEE 802.1D, IEEE 802.1Q connectivity scope, EAPOL scope defaults
-     * to TPMR-transparent, but anyway we are MAC Bridge/VLAN Bridge, not even
-     * Provider Bridge nor Provider Backbone Bridge.
-     */
-    if (((eth_reserved_addr_base[0] ^ ethhdr->h_dest[0]) |
-         (eth_reserved_addr_base[1] ^ ethhdr->h_dest[1]) |
-         (eth_reserved_addr_base[2] ^ ethhdr->h_dest[2]) |
-         (eth_reserved_addr_base[3] ^ ethhdr->h_dest[3]) |
-         (eth_reserved_addr_base[4] ^ ethhdr->h_dest[4])) != 0) {
+    if (ntohs(ethhdr->h_proto) != ETH_P_MACSEC) {
+        /* As we support multi-access LAN, 'Y' function directs the received
+         * packet to the Uncontrolled Port, which is not associated to any SecY.
+         *
+         * We do not offload EAPOL. All the protocol handling, relevant state
+         * management and even basic header validation are up to the control
+         * plane, so we bypass SecY selection iff. it will be passed to the
+         * Uncontrolled Port of the selected SecY.
+         *
+         * TODO: we should do the selection here in the case of stacked ISS.
+         */
+        rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
         return;
     }
 
-    if (ntohs(ethhdr->h_proto) != ETH_P_PAE) {
-        goto local_rcv;
-    }
+    fill_ctx(ctx, iov, iovcnt, secy, data_offset);
 
-    switch (ethhdr->h_dest[5]) {
-    case 0x00: /* Bridge Group Address */
-    case 0x03: /* PAE Group Address */
-    case 0x0E: /* LLDP Multicast Address */
-        break;
-    default:
+    if (secy_decrypt(ctx)) {
+        secy_drop(ctx);
         return;
     }
 
-local_rcv:
-    rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
+    if (!ctx->out_pport) {
+        /* CAVEAT: Higher layer entity cannot distinguish whether tha data is
+         * associated to the secure ISS or insecure iSS,
+         * In both cases, copy_to_cpu has to be set to 1.
+         */
+        rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
+    } else if (ctx->out_pport != ctx->in_pport) {
+        /* Maybe SecY protection on out_pport happens later on fp_port_eg. */
+        rocker_port_eg(world_rocker(ctx->sci_table->world), ctx->out_pport,
+                       ctx->iov, ctx->iovcnt);
+    }
 }
 
 static size_t
@@ -835,9 +814,8 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
     return sofar;
 }
 
-/* 'Common Port' ingress */
-static ssize_t secy_ig(World *world, uint32_t pport,
-                       const struct iovec *iov, int iovcnt)
+static ssize_t secy_world_ig(World *world, uint32_t pport,
+                             const struct iovec *iov, int iovcnt)
 {
     SCITable *sci_table = world_private(world);
     RxSC *rxsc;
@@ -856,8 +834,7 @@ static ssize_t secy_ig(World *world, uint32_t pport,
     data_offset = parse_sectag(&ctx, iov);
 
     if (data_offset < 0 || !ctx.processing_sec) {
-        u_port_rx(&ctx, iov, iovcnt);
-        return iov_size(iov, iovcnt);
+        goto global_uncontrolled_port;
     }
 
     rxsc = rxsc_find(sci_table, ctx.sci);
@@ -866,19 +843,17 @@ static ssize_t secy_ig(World *world, uint32_t pport,
     }
     secy = rxsc->sc_common.secy;
     if (!secy) {
-        return -1;
+        goto global_uncontrolled_port;
     }
 
-    fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
+    secy_ig(secy, &ctx, iov, iovcnt, data_offset);
 
-    if (secy_decrypt(&ctx)) {
-        secy_drop(&ctx);
-        return 0;
-    }
-
-    c_port_rx(&ctx);
     notify_stats(&ctx);
 
+    return iov_size(iov, iovcnt);
+
+global_uncontrolled_port:
+    rx_produce(world, pport, iov, iovcnt, 1);
     return iov_size(iov, iovcnt);
 }
 
@@ -895,9 +870,9 @@ static ssize_t secy_ig(World *world, uint32_t pport,
  *
  * pport identifies the associated 'Common Port'.
  */
-static int secy_eg(World *world, uint32_t pport,
-                   const struct iovec *iov, int iovcnt,
-                   struct iovec *new_iov, int *new_iovcnt)
+static int secy_world_eg(World *world, uint32_t pport,
+                         const struct iovec *iov, int iovcnt,
+                         struct iovec *new_iov, int *new_iovcnt)
 {
     SCITable *sci_table = world_private(world);
     TxSC *txsc;
@@ -1145,8 +1120,8 @@ static WorldOps secy_ops = {
     .name = "secy",
     .init = secy_init,
     .uninit = secy_uninit,
-    .eg = secy_eg,
-    .ig = secy_ig,
+    .eg = secy_world_eg,
+    .ig = secy_world_ig,
     .cmd = secy_cmd,
 };
 
