@@ -419,6 +419,7 @@ static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
     cur = 0;
 
     ctx->iov[0].iov_base = g_malloc(data_offset);
+    ctx->iov[0].iov_len = 0;
 
     /* move DA/SA and append SecTAG including ET */
     pos = ctx->iov[0].iov_base;
