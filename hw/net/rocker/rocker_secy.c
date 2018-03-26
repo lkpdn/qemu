@@ -1004,21 +1004,26 @@ static int secy_sa_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     sci_t sci;
     uint8_t an;
     uint32_t pn;
+    uint8_t* sak;
+    uint8_t ki = 0x01;
 
     if (!tlvs[ROCKER_TLV_SECY_SCI] ||
         !tlvs[ROCKER_TLV_SECY_AN] ||
-        !tlvs[ROCKER_TLV_SECY_PN]) {
+        !tlvs[ROCKER_TLV_SECY_PN] ||
+        !tlvs[ROCKER_TLV_SECY_SAK] ||
+        !tlvs[ROCKER_TLV_SECY_SAK_LEN]) {
         return -ROCKER_EINVAL;
     }
 
     sci = (sci_t)rocker_tlv_get_le64(tlvs[ROCKER_TLV_SECY_SCI]);
     an = (sci_t)rocker_tlv_get_u8(tlvs[ROCKER_TLV_SECY_AN]);
     pn = (sci_t)rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_PN]);
+    sak = (uint8_t *)rocker_tlv_data(tlvs[ROCKER_TLV_SECY_SAK]);
 
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SA:
-        secy_add_sa(tbl, sci, an, pn, NULL, NULL);
+        secy_add_sa(tbl, sci, an, pn, sak, &ki);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_RX_SA:
