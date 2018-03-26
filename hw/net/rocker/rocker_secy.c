@@ -302,12 +302,14 @@ static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
                                sec_len + tag_len, out_iovec.iov_base,
                                sec_len + tag_len, &err);
     if (ret) {
+        error_report_err(err);
         goto err_out;
     }
 
     ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher, out_iovec.iov_base + sec_len,
                                tag_len, &err);
     if (ret) {
+        error_report_err(err);
         goto err_out;
     }
 
@@ -324,7 +326,6 @@ static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
     return -ROCKER_SECY_CRYPTO_OK;
 
 err_out:
-    error_report_err(err);
     g_free(out_iovec.iov_base);
     return -ROCKER_SECY_CRYPTO_ERR;
 }
@@ -346,12 +347,14 @@ static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
                                sec_len, out_iovec.iov_base,
                                sec_len + tag_len, &err);
     if (ret) {
+        error_report_err(err);
         goto err_out;
     }
 
     ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher,
                                out_iovec.iov_base + sec_len, tag_len, &err);
     if (ret) {
+        error_report_err(err);
         goto err_out;
     }
 
@@ -361,7 +364,6 @@ static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
     return ROCKER_SECY_CRYPTO_OK;
 
 err_out:
-    error_report_err(err);
     g_free(out_iovec.iov_base);
     return -ROCKER_SECY_CRYPTO_ERR;
 }
