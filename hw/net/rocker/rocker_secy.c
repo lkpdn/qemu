@@ -109,7 +109,7 @@ typedef struct tx_sc {
     bool transmitting;
 
     uint8_t encoding_sa;
-    struct tx_sa *txa[MACSEC_NUM_AN];
+    struct tx_sa **txa;
 } TxSC;
 
 typedef struct rx_sc {
@@ -124,7 +124,7 @@ typedef struct rx_sc {
     bool interleaving;
     int64_t last_interleaved_time;
 
-    struct rx_sa *rxa[MACSEC_NUM_AN];
+    struct rx_sa **rxa;
 
     QLIST_ENTRY(rx_sc) next;
 } RxSC;
