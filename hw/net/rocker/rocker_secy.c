@@ -466,7 +466,7 @@ static TxSC *txsc_find(SCITable *sci_table, sci_t sci)
 {
     SCCommon *sc;
 
-    sc = g_hash_table_lookup(sci_table->tbl, (uint64_t *)&sci);
+    sc = g_hash_table_lookup(sci_table->tbl, &sci);
     if (sc && sc->is_tx)
         return (TxSC *)sc;
 
@@ -477,7 +477,7 @@ static RxSC *rxsc_find(SCITable *sci_table, sci_t sci)
 {
     SCCommon *sc;
 
-    sc = g_hash_table_lookup(sci_table->tbl, (uint64_t *)&sci);
+    sc = g_hash_table_lookup(sci_table->tbl, &sci);
     if (sc && !sc->is_tx)
         return (RxSC *)sc;
 
@@ -488,7 +488,7 @@ static SecY *secy_find(SCITable *sci_table, sci_t sci)
 {
     SCCommon *sc;
 
-    sc = g_hash_table_lookup(sci_table->tbl, (uint64_t *)&sci);
+    sc = g_hash_table_lookup(sci_table->tbl, &sci);
     if (sc)
         return sc->secy;
 
