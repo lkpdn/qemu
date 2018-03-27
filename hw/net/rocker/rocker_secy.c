@@ -173,7 +173,7 @@ typedef struct ciphersuite {
     bool integrity_protection;
     bool confidentiality_protection;
     int icv_len;
-    int (*set_nonce)(CipherSuite *cs, SecY *secy, SecYContext *ctx);
+    int (*set_nonce)(CipherSuite *cs, SecYContext *ctx);
     int (*decrypt)(CipherSuite *cs, SecYContext *ctx);
     int (*encrypt)(CipherSuite *cs, SecYContext *ctx);
 } CipherSuite;
@@ -256,19 +256,17 @@ static LgPortOps secy_lg_ops = {
 /*
  * For secure frame generation/validation
  */
-static int gcm_aes_128_set_nonce(CipherSuite *cs, SecY *secy, SecYContext *ctx)
+static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 {
-    uint8_t an;
     uint32_t pn;
     uint8_t iv[12];
     size_t tag_len;
     Error *err = NULL;
 
     tag_len = cs->icv_len;
-    an = secy->tx_sc->encoding_sa;
-    pn = secy->tx_sc->txa[an]->sa_common.next_pn;
+    pn = ctx->sa->next_pn;
 
-    iv[0] = cpu_to_be64(secy->sci);
+    iv[0] = cpu_to_be64(ctx->secy->sci);
     iv[8] = cpu_to_be32(pn);
 
     if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, 12, ctx->iov[0].iov_len,
@@ -656,13 +654,13 @@ static int secy_decrypt(struct secy_context *ctx)
     return cs->decrypt(cs, ctx);
 }
 
-static int secy_encrypt(struct secy_context *ctx, SecY *secy)
+static int secy_encrypt(struct secy_context *ctx)
 {
     int ret;
-    CipherSuite *ciphersuite = secy->current_ciphersuite;
+    CipherSuite *ciphersuite = ctx->secy->current_ciphersuite;
 
     if (ciphersuite->set_nonce) {
-        ret = ciphersuite->set_nonce(ciphersuite, secy, ctx);
+        ret = ciphersuite->set_nonce(ciphersuite, ctx);
         if (ret) {
             return ret;
         }
