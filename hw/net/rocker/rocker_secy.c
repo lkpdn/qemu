@@ -755,8 +755,8 @@ validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
         sectag_len = sizeof(SecTAG) + 8;
     }
 
-    switch (sectag->tci_an &
-            (ROCKER_SECY_TCI_BIT_E|ROCKER_SECY_TCI_BIT_C) >> 2) {
+    switch ((sectag->tci_an &
+             (ROCKER_SECY_TCI_BIT_E|ROCKER_SECY_TCI_BIT_C)) >> 2) {
     case 0x00:
         /* Normal case where neighther confidentiality nor integrity are being
          * provided. This potentially includes the case where not the default
