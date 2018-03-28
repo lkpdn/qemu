@@ -649,7 +649,15 @@ static void secy_drop(struct secy_context *ctx)
 
 static int secy_decrypt(struct secy_context *ctx)
 {
+    int ret;
     CipherSuite *cs = ctx->secy->current_ciphersuite;
+
+    if (cs->set_nonce) {
+        ret = cs->set_nonce(cs, ctx);
+        if (ret) {
+            return ret;
+        }
+    }
 
     return cs->decrypt(cs, ctx);
 }
