@@ -756,8 +756,7 @@ validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
         DPRINTF("parse_sectag invalid TCI\n");
         return -1;
     } else {
-        sci_t sci = ntohs(sectag->sci);
-        memcpy(&ctx->sci, &sci, sizeof(sci_t));
+        memcpy(&ctx->sci, &sectag->sci, sizeof(sci_t));
         sectag_len = sizeof(SecTAG) + 8;
     }
 
