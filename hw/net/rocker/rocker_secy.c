@@ -160,6 +160,7 @@ typedef struct secy_context {
     int iovcnt;
     SCITable *sci_table;
     SecY *secy;
+    uint8_t an;
     SACommon *sa;
     SecTAG *sectag;
     bool processing_sec;
@@ -760,6 +761,7 @@ validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
         sectag_len = sizeof(SecTAG) + 8;
     }
 
+    ctx->an = sectag->tci_an & ROCKER_SECY_TCI_AN_MASK;
     switch ((sectag->tci_an &
              (ROCKER_SECY_TCI_BIT_E|ROCKER_SECY_TCI_BIT_C)) >> 2) {
     case 0x00:
@@ -856,6 +858,8 @@ static ssize_t secy_world_ig(World *world, uint32_t pport,
         goto global_uncontrolled_port;
     }
 
+    ctx.secy = secy;
+    ctx.sa = (SACommon *)rxsc->rxa[ctx.an];
     secy_ig(secy, &ctx, iov, iovcnt, data_offset);
 
     notify_stats(&ctx);
@@ -931,8 +935,12 @@ static int secy_world_eg(World *world, uint32_t pport,
     if (!secy) {
         return -ROCKER_EINVAL;
     }
+    ctx.secy = secy;
     fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
-    secy_encrypt(&ctx, secy);
+
+    ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
+    secy_encrypt(&ctx);
+
     return ROCKER_OK;
 }
 
