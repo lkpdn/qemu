@@ -939,7 +939,9 @@ static int secy_world_eg(World *world, uint32_t pport,
     fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
 
     ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
-    secy_encrypt(&ctx);
+    if (secy_encrypt(&ctx)) {
+        return -ROCKER_EINVAL;
+    }
 
     return ROCKER_OK;
 }
