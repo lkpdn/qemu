@@ -270,8 +270,9 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     iv[0] = cpu_to_be64(ctx->secy->sci);
     iv[8] = cpu_to_be32(pn);
 
-    if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, 12, ctx->iov[0].iov_len,
-                               ctx->iov[1].iov_len, tag_len, &err)) {
+    if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, ARRAY_SIZE(iv),
+                               ctx->iov[0].iov_len, ctx->iov[1].iov_len,
+                               tag_len, &err)) {
         return -ROCKER_SECY_CRYPTO_ERR;
     }
 
@@ -286,26 +287,28 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
-    uint8_t iv[8]; /* XXX */
+    uint8_t iv[12]; /* XXX */
     struct iovec out_iovec;
     size_t sec_len, tag_len;
     Error *err = NULL;
 
     tag_len = cs->icv_len;
-    sec_len = ctx->iov[1].iov_len - tag_len;
+    sec_len = ctx->iov[1].iov_len;
+
+    assert(tag_len == ctx->iov[2].iov_len);
 
     out_iovec.iov_base = g_malloc(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
 
     ret = qcrypto_aead_decrypt(ctx->sa->sak.cipher, ctx->iov[1].iov_base,
-                               sec_len + tag_len, out_iovec.iov_base,
-                               sec_len + tag_len, &err);
+                               sec_len, out_iovec.iov_base,
+                               sec_len, &err);
     if (ret) {
         error_report_err(err);
         goto err_out;
     }
 
-    ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher, out_iovec.iov_base + sec_len,
+    ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher, ctx->iov[2].iov_base,
                                tag_len, &err);
     if (ret) {
         error_report_err(err);
@@ -314,13 +317,15 @@ static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
 
     iv[0] = cpu_to_be64(ctx->secy->sci);
     iv[8] = cpu_to_be32(ctx->sa->next_pn);
-    if (memcmp(out_iovec.iov_base + sec_len, iv, 8)) {
+    if (memcmp(ctx->iov[2].iov_base, iv, 12)) {
         goto err_out;
     }
 
     g_free(ctx->iov[1].iov_base);
     ctx->iov[1].iov_base = out_iovec.iov_base;
     ctx->iov[1].iov_len = sec_len;
+    ctx->iov[0].iov_len = ETH_ALEN * 2;
+    ctx->iovcnt = 2;
 
     return -ROCKER_SECY_CRYPTO_OK;
 
@@ -414,46 +419,24 @@ static QCryptoAead *alloc_cipher_context(cipher_id_t cipher_id,
 static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
                     SecY *secy, int data_offset)
 {
-    int i, remaining, copy, cur;
-    void *pos;
+    size_t in_len, tag_len;
 
-    cur = 0;
-
+    /* TODO: optimise */
+    in_len = iov_size(iov, iovcnt);
+    tag_len = secy->current_ciphersuite->icv_len;
     ctx->iov[0].iov_base = g_malloc(data_offset);
-    ctx->iov[0].iov_len = 0;
+    ctx->iov[0].iov_len = data_offset;
+    ctx->iov[1].iov_base = g_malloc(in_len - data_offset - tag_len);
+    ctx->iov[1].iov_len = in_len - data_offset - tag_len;
+    ctx->iov[2].iov_base = g_malloc(tag_len);
+    ctx->iov[2].iov_len = tag_len;
+    ctx->iovcnt = 3;
 
-    /* move DA/SA and append SecTAG including ET */
-    pos = ctx->iov[0].iov_base;
-    remaining = data_offset;
-    for (i = 0; i < iovcnt; i++) {
-        if (iov[i].iov_len > remaining)
-            copy = remaining;
-        else
-            copy = iov[i].iov_len;
-
-        memcpy(pos, iov[i].iov_base, copy);
-        pos += copy;
-        ctx->iov[0].iov_len += copy;
-        remaining -= copy;
-
-        if (!remaining)
-            break;
-
-        cur += 1;
-    }
-
-    if (remaining)
-        return -1;
-
-    /* TODO: vlan tag insertion may occur */
-    for (i = 1; cur < iovcnt; cur++, i++) {
-        ctx->iov[i].iov_base = iov[cur].iov_base + copy;
-        ctx->iov[i].iov_len = iov[cur].iov_len - copy;
-        copy = 0;
-    }
-
-    ctx->iovcnt = i;
-    ctx->iov[i - 1].iov_base = g_malloc(8); /* XXX */
+    iov_to_buf(iov, iovcnt, 0, ctx->iov[0].iov_base, data_offset);
+    iov_to_buf(iov, iovcnt, data_offset, ctx->iov[1].iov_base,
+               in_len - data_offset - tag_len);
+    iov_to_buf(iov, iovcnt, data_offset + tag_len,
+               ctx->iov[2].iov_base, tag_len);
 
     return 0;
 }
