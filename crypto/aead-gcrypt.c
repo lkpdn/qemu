@@ -41,7 +41,7 @@ QCryptoAead *qcrypto_aead_new(QCryptoCipherAlgorithm alg,
         break;
     default:
         error_setg(errp, "Unsupported AEAD mode %s",
-                   QCryptoCipherMode_lookup[mode]);
+                   QCryptoCipherMode_lookup.array[mode]);
         return NULL;
     }
 
@@ -63,7 +63,7 @@ QCryptoAead *qcrypto_aead_new(QCryptoCipherAlgorithm alg,
         break;
     default:
         error_setg(errp, "Unsupported AEAD algorithm %s",
-                   QCryptoCipherAlgorithm_lookup[alg]);
+                   QCryptoCipherAlgorithm_lookup.array[alg]);
         return NULL;
     }
 
