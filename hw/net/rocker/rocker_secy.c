@@ -271,7 +271,7 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     memcpy(&iv[8], &pn, 4);
 
     if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, ARRAY_SIZE(iv),
-                               ctx->iov[0].iov_len, ctx->iov[1].iov_len,
+                               ctx->iov[0].iov_len, ctx->iov[1].iov_len - tag_len,
                                tag_len, &err)) {
         return -ROCKER_SECY_CRYPTO_ERR;
     }
@@ -287,17 +287,14 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
-    uint8_t iv[12]; /* XXX */
     struct iovec out_iovec;
     size_t sec_len, tag_len;
     Error *err = NULL;
 
     tag_len = cs->icv_len;
-    sec_len = ctx->iov[1].iov_len;
+    sec_len = ctx->iov[1].iov_len - tag_len;
 
-    assert(tag_len == ctx->iov[2].iov_len);
-
-    out_iovec.iov_base = g_malloc(sec_len + tag_len);
+    out_iovec.iov_base = g_malloc0(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
 
     ret = qcrypto_aead_decrypt(ctx->sa->sak.cipher, ctx->iov[1].iov_base,
@@ -308,17 +305,11 @@ static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
         goto err_out;
     }
 
-    ret = qcrypto_aead_get_tag(ctx->sa->sak.cipher, ctx->iov[2].iov_base,
-                               tag_len, &err);
+    ret = qcrypto_aead_checktag(ctx->sa->sak.cipher,
+                                ctx->iov[1].iov_base + sec_len,
+                                tag_len, &err);
     if (ret) {
         error_report_err(err);
-        goto err_out;
-    }
-
-    memcpy(iv, &ctx->secy->sci, 8);
-    __be32 pn = cpu_to_be32(ctx->sa->next_pn);
-    memcpy(&iv[8], &pn, 4);
-    if (memcmp(ctx->iov[2].iov_base, iv, 12)) {
         goto err_out;
     }
 
@@ -345,12 +336,12 @@ static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
     sec_len = ctx->iov[1].iov_len;
     tag_len = cs->icv_len;
 
-    out_iovec.iov_base = g_malloc(sec_len + tag_len);
+    out_iovec.iov_base = g_malloc0(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
 
     ret = qcrypto_aead_encrypt(ctx->sa->sak.cipher, ctx->iov[1].iov_base,
                                sec_len, out_iovec.iov_base,
-                               sec_len + tag_len, &err);
+                               sec_len, &err);
     if (ret) {
         error_report_err(err);
         goto err_out;
@@ -420,24 +411,19 @@ static QCryptoAead *alloc_cipher_context(cipher_id_t cipher_id,
 static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
                     SecY *secy, int data_offset)
 {
-    size_t in_len, tag_len;
+    size_t in_len;
 
     /* TODO: optimise */
     in_len = iov_size(iov, iovcnt);
-    tag_len = secy->current_ciphersuite->icv_len;
-    ctx->iov[0].iov_base = g_malloc(data_offset);
+    ctx->iov[0].iov_base = g_malloc0(data_offset);
     ctx->iov[0].iov_len = data_offset;
-    ctx->iov[1].iov_base = g_malloc(in_len - data_offset - tag_len);
-    ctx->iov[1].iov_len = in_len - data_offset - tag_len;
-    ctx->iov[2].iov_base = g_malloc(tag_len);
-    ctx->iov[2].iov_len = tag_len;
-    ctx->iovcnt = 3;
+    ctx->iov[1].iov_base = g_malloc0(in_len - data_offset);
+    ctx->iov[1].iov_len = in_len - data_offset;
+    ctx->iovcnt = 2;
 
     iov_to_buf(iov, iovcnt, 0, ctx->iov[0].iov_base, data_offset);
     iov_to_buf(iov, iovcnt, data_offset, ctx->iov[1].iov_base,
-               in_len - data_offset - tag_len);
-    iov_to_buf(iov, iovcnt, data_offset + tag_len,
-               ctx->iov[2].iov_base, tag_len);
+               in_len - data_offset);
 
     return 0;
 }
