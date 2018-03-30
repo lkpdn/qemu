@@ -584,21 +584,33 @@ static int secy_add_sa(SCITable *sci_table, sci_t sci, uint8_t an, uint32_t pn,
     if (!(!!tx_sc ^ !!rx_sc))
         return 0; /* may i return an error */
 
+    /* Currently iproute2 control does not support online sak update,
+     * meaning that MKA use is not assumed yet.
+     */
     if (tx_sc) {
         secy = tx_sc->sc_common.secy;
-        tx_sa = g_new0(TxSA, 1);
+        if (tx_sc->txa[an]) {
+            tx_sa = tx_sc->txa[an];
+        } else {
+            tx_sa = g_new0(TxSA, 1);
+            tx_sc->txa[an] = tx_sa;
+        }
         tx_sa->sa_common.next_pn = pn;
-        tx_sc->txa[an] = tx_sa;
         sak = &tx_sc->txa[an]->sa_common.sak;
     } else {
         secy = rx_sc->sc_common.secy;
-        rx_sa = g_new0(RxSA, 1);
+        if (rx_sc->rxa[an]) {
+            rx_sa = rx_sc->rxa[an];
+        } else {
+            rx_sa = g_new0(RxSA, 1);
+            rx_sc->rxa[an] = rx_sa;
+        }
         rx_sa->sa_common.next_pn = pn;
-        rx_sc->rxa[an] = rx_sa;
         sak = &rx_sc->rxa[an]->sa_common.sak;
     }
-
-    sak->cipher = alloc_cipher_context(secy->current_ciphersuite->id, key);
+    if (!sak->cipher) {
+        sak->cipher = alloc_cipher_context(secy->current_ciphersuite->id, key);
+    }
 
     return 0;
 }
