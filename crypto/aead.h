@@ -177,4 +177,29 @@ int qcrypto_aead_get_tag(QCryptoAead *aead,
                          uint8_t *tag, size_t tag_len,
                          Error **errp);
 
+/**
+ * qcrypto_aead_checktag:
+ * @aead: the aead object
+ * @tag: the tag buffer
+ * @tag_len: the length of @tag
+ *
+ * Check the authentication tag after decryption
+ *
+ * Returns:
+ *  0 if success, or -1 on error
+ */
+int qcrypto_aead_checktag(QCryptoAead *aead,
+                          const uint8_t *tag, size_t tag_len,
+                          Error **errp);
+
+/**
+ * qcrypto_aead_reset:
+ * @aead: the aead object
+ *
+ * Clear aad, nonce and authentication tag
+ *
+ * Returns:
+ *  0 if success, or -1 on error
+ */
+int qcrypto_aead_reset(QCryptoAead *aead, Error **errp);
 #endif

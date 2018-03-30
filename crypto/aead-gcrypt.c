@@ -229,3 +229,39 @@ int qcrypto_aead_get_tag(QCryptoAead *aead,
 
     return 0;
 }
+
+int qcrypto_aead_checktag(QCryptoAead *aead,
+                          const uint8_t *tag, size_t tag_len,
+                          Error **errp)
+{
+    QCryptoAeadGcrypt *ctx;
+    gcry_error_t err;
+
+    ctx = aead->opaque;
+
+    err = gcry_cipher_checktag(ctx->handle, tag, tag_len);
+    if (err) {
+        error_setg(errp, "The authentication tag is invalid: %s",
+                   gcry_strerror(err));
+        return -1;
+    }
+
+    return 0;
+}
+
+int qcrypto_aead_reset(QCryptoAead *aead, Error **errp)
+{
+    QCryptoAeadGcrypt *ctx;
+    gcry_error_t err;
+
+    ctx = aead->opaque;
+
+    err = gcry_cipher_reset(ctx->handle);
+    if (err) {
+        error_setg(errp, "Failed to reset AEAD context: %s",
+                   gcry_strerror(err));
+        return -1;
+    }
+
+    return 0;
+}

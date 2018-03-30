@@ -230,3 +230,28 @@ int qcrypto_aead_get_tag(QCryptoAead *aead,
 
     return 0;
 }
+
+int qcrypto_aead_checktag(QCryptoAead *aead,
+                          const uint8_t *tag, size_t tag_len,
+                          Error **errp)
+{
+    QCryptoAeadNettle *ctx;
+    struct qcrypto_nettle_aead_alg *aead_ops;
+    uint8_t *digest;
+
+    ctx = (QCryptoAeadNettle *)aead->opaque;
+    aead_ops = &qcrypto_aead_alg_map[aead->mode][aead->alg];
+
+    aead_ops->digest(&ctx->u, tag_len, digest);
+
+    if (!memcmp(digest, tag, tag_len)) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int qcrypto_aead_reset(QCryptoAead *aead, Error **errp)
+{
+    return 0;
+}
