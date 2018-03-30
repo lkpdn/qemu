@@ -739,7 +739,7 @@ validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
         if (!(sectag->tci_an & ROCKER_SECY_TCI_BIT_SCB)) {
             ctx->sci |= 1; /* port id = 0x01 */
         }
-        sectag_len = sizeof(SecTAG);
+        sectag_len = sizeof(SecTAG) - sizeof(sci_t);
     } else if (sizeof(sci_t) > remaining) {
         DPRINTF("parse_sectag underrun on SecTAG SCI\n");
         return -1;
@@ -750,7 +750,7 @@ validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
         return -1;
     } else {
         memcpy(&ctx->sci, &sectag->sci, sizeof(sci_t));
-        sectag_len = sizeof(SecTAG) + 8;
+        sectag_len = sizeof(SecTAG);
     }
 
     ctx->an = sectag->tci_an & ROCKER_SECY_TCI_AN_MASK;
@@ -787,7 +787,7 @@ validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
 static size_t
 parse_sectag(struct secy_context *ctx, const struct iovec *iov)
 {
-    SecTAG *sectag = ctx->sectag;
+    SecTAG **sectag = &ctx->sectag;
     struct eth_header *ethhdr;
     size_t remaining, sofar = 0;
     int sectag_len;
@@ -802,14 +802,13 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
         return -1;
     }
 
-    sofar += sizeof(SecTAG);
     remaining = iov->iov_len - sofar;
     if (iov->iov_len < sofar) {
         DPRINTF("parse_sectag underrun on SecTAG without SCI\n");
         return -1;
     }
-    sectag = (SecTAG *)(ethhdr + 1);
-    sectag_len = validate_sectag(ethhdr, sectag, remaining, ctx);
+    *sectag = (SecTAG *)(ethhdr + 1);
+    sectag_len = validate_sectag(ethhdr, *sectag, remaining, ctx);
     if (sectag_len < 0) {
         return -1;
     }
