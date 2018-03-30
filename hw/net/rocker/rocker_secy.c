@@ -637,6 +637,10 @@ static int secy_decrypt(struct secy_context *ctx)
     int ret;
     CipherSuite *cs = ctx->secy->current_ciphersuite;
 
+    if (!ctx->sa->sak.cipher) {
+        return -1;
+    }
+
     if (cs->set_nonce) {
         ret = cs->set_nonce(cs, ctx);
         if (ret) {
@@ -651,6 +655,10 @@ static int secy_encrypt(struct secy_context *ctx)
 {
     int ret;
     CipherSuite *ciphersuite = ctx->secy->current_ciphersuite;
+
+    if (!ctx->sa->sak.cipher) {
+        return -1;
+    }
 
     if (ciphersuite->set_nonce) {
         ret = ciphersuite->set_nonce(ciphersuite, ctx);
