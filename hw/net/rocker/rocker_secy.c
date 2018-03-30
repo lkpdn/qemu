@@ -265,9 +265,13 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     Error *err = NULL;
 
     tag_len = cs->icv_len;
-    pn = cpu_to_be32(ctx->sa->next_pn);
+    if (ctx->sectag && ctx->sectag->pn) {
+        pn = ctx->sectag->pn;
+    } else {
+        pn = cpu_to_be32(ctx->sa->next_pn);
+    }
 
-    memcpy(iv, &ctx->secy->sci, 8);
+    memcpy(iv, &ctx->sci, 8);
     memcpy(&iv[8], &pn, 4);
 
     if (qcrypto_aead_reset(ctx->sa->sak.cipher, &err)) {
