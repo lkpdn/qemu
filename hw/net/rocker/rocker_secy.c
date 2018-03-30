@@ -259,16 +259,16 @@ static LgPortOps secy_lg_ops = {
  */
 static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 {
-    uint32_t pn;
+    __be32 pn;
     uint8_t iv[12];
     size_t tag_len;
     Error *err = NULL;
 
     tag_len = cs->icv_len;
-    pn = ctx->sa->next_pn;
+    pn = cpu_to_be32(ctx->sa->next_pn);
 
-    iv[0] = cpu_to_be64(ctx->secy->sci);
-    iv[8] = cpu_to_be32(pn);
+    memcpy(iv, &ctx->secy->sci, 8);
+    memcpy(&iv[8], &pn, 4);
 
     if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, ARRAY_SIZE(iv),
                                ctx->iov[0].iov_len, ctx->iov[1].iov_len,
@@ -315,8 +315,9 @@ static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
         goto err_out;
     }
 
-    iv[0] = cpu_to_be64(ctx->secy->sci);
-    iv[8] = cpu_to_be32(ctx->sa->next_pn);
+    memcpy(iv, &ctx->secy->sci, 8);
+    __be32 pn = cpu_to_be32(ctx->sa->next_pn);
+    memcpy(&iv[8], &pn, 4);
     if (memcmp(ctx->iov[2].iov_base, iv, 12)) {
         goto err_out;
     }
