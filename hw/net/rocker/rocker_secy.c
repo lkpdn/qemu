@@ -437,6 +437,19 @@ static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
 }
 
 /*
+ * FDB manipulations
+ */
+static int secy_fdb_add(SCITable *sci_table)
+{
+    return 0;
+}
+
+static int secy_fdb_del(SCITable *sci_table)
+{
+    return 0;
+}
+
+/*
  * SC manipulations
  */
 static TxSC *txsc_find(SCITable *sci_table, sci_t sci)
@@ -966,6 +979,23 @@ static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
     return 0;
 }
 
+static int secy_fdb_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
+{
+    if (!tlvs[ROCKER_TLV_SECY_PPORT])
+        return -ROCKER_EINVAL;
+
+    switch (cmd) {
+    case ROCKER_TLV_CMD_TYPE_SECY_FDB_ADD:
+        secy_fdb_add(tbl);
+        return -ROCKER_OK;
+    case ROCKER_TLV_CMD_TYPE_SECY_FDB_DEL:
+        secy_fdb_del(tbl);
+        return -ROCKER_OK;
+    }
+
+    return -ROCKER_ENOTSUP;
+}
+
 static int secy_sc_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 {
     SecY *secy;
@@ -1085,6 +1115,9 @@ static int secy_cmd(World *world, struct desc_info *info,
     rocker_tlv_parse_nested(tlvs, ROCKER_TLV_SECY_MAX, cmd_info_tlv);
 
     switch (cmd) {
+    case ROCKER_TLV_CMD_TYPE_SECY_FDB_ADD:
+    case ROCKER_TLV_CMD_TYPE_SECY_FDB_DEL:
+        return secy_fdb_cmd(sci_table, cmd, tlvs);
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SC:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SC:
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SC:

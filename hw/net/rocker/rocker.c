@@ -455,6 +455,8 @@ static int cmd_consume(Rocker *r, DescInfo *info)
         world = r->worlds[ROCKER_WORLD_TYPE_OF_DPA];
         err = world_do_cmd(world, info, buf, cmd, info_tlv);
         break;
+    case ROCKER_TLV_CMD_TYPE_SECY_FDB_ADD:
+    case ROCKER_TLV_CMD_TYPE_SECY_FDB_DEL:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SC:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_TX_SA:
     case ROCKER_TLV_CMD_TYPE_SECY_ADD_RX_SC:
