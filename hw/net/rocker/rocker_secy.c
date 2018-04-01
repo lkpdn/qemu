@@ -372,6 +372,51 @@ err_out:
     return -ROCKER_SECY_CRYPTO_ERR;
 }
 
+static int gcm_aes_256_set_nonce(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_256_decrypt(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_256_encrypt(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_xpn_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_xpn_128_decrypt(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_xpn_128_encrypt(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_xpn_256_set_nonce(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_xpn_256_decrypt(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
+static int gcm_aes_xpn_256_encrypt(CipherSuite *cs, SecYContext *ctx)
+{
+    return ROCKER_SECY_CRYPTO_OK;
+}
+
 static CipherSuite ciphersuites[] = { {
     .id                         = 0x0080020001000001,
     .name                       = "GCM-AES-128",
@@ -381,6 +426,33 @@ static CipherSuite ciphersuites[] = { {
     .set_nonce                  = gcm_aes_128_set_nonce,
     .decrypt                    = gcm_aes_128_decrypt,
     .encrypt                    = gcm_aes_128_encrypt,
+}, {
+    .id                         = 0x0080020001000002,
+    .name                       = "GCM-AES-256",
+    .integrity_protection       = true,
+    .confidentiality_protection = true,
+    .icv_len                    = 16,
+    .set_nonce                  = gcm_aes_256_set_nonce,
+    .decrypt                    = gcm_aes_256_decrypt,
+    .encrypt                    = gcm_aes_256_encrypt,
+}, {
+    .id                         = 0x0080020001000003,
+    .name                       = "GCM-AES-XPN-128",
+    .integrity_protection       = true,
+    .confidentiality_protection = true,
+    .icv_len                    = 16,
+    .set_nonce                  = gcm_aes_xpn_128_set_nonce,
+    .decrypt                    = gcm_aes_xpn_128_decrypt,
+    .encrypt                    = gcm_aes_xpn_128_encrypt,
+}, {
+    .id                         = 0x0080020001000004,
+    .name                       = "GCM-AES-XPN-256",
+    .integrity_protection       = true,
+    .confidentiality_protection = true,
+    .icv_len                    = 16,
+    .set_nonce                  = gcm_aes_xpn_256_set_nonce,
+    .decrypt                    = gcm_aes_xpn_256_decrypt,
+    .encrypt                    = gcm_aes_xpn_256_encrypt,
 } };
 
 static CipherSuite *find_ciphersuite(cipher_id_t cipher_id)
