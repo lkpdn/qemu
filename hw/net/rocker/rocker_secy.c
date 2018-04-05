@@ -819,57 +819,6 @@ static int secy_encrypt(struct secy_context *ctx)
     return ciphersuite->encrypt(ciphersuite, ctx);
 }
 
-static void secy_ig(SecY *secy, SecYContext *ctx,
-                    const struct iovec *iov, int iovcnt, int data_offset)
-{
-    struct eth_header *ethhdr;
-
-    /* TODO: we should provide admin interface which turns on or off the
-     * Unauthorized VLANs (IEEE 802.1X-2010 7.5.3). about the Selective
-     * Relay like WoL, see secy_world_eg().
-     */
-
-    if (iov->iov_len < sizeof(struct eth_header)) {
-        return;
-    }
-
-    ethhdr = iov->iov_base;
-    ctx->eth_header = ethhdr;
-    if (ntohs(ethhdr->h_proto) != ETH_P_MACSEC) {
-        /* As we support multi-access LAN, 'Y' function directs the received
-         * packet to the Uncontrolled Port, which is not associated to any SecY.
-         *
-         * We do not offload EAPOL. All the protocol handling, relevant state
-         * management and even basic header validation are up to the control
-         * plane, so we bypass SecY selection iff. it will be passed to the
-         * Uncontrolled Port of the selected SecY.
-         *
-         * TODO: we should do the selection here in the case of stacked ISS.
-         */
-        rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
-        return;
-    }
-
-    fill_ctx(ctx, iov, iovcnt, secy, data_offset);
-
-    if (secy_decrypt(ctx)) {
-        secy_drop(ctx);
-        return;
-    }
-
-    if (!ctx->out_pport) {
-        /* CAVEAT: Higher layer entity cannot distinguish whether tha data is
-         * associated to the secure ISS or insecure iSS,
-         * In both cases, copy_to_cpu has to be set to 1.
-         */
-        rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
-    } else if (ctx->out_pport != ctx->in_pport) {
-        /* Maybe SecY protection on out_pport happens later on fp_port_eg. */
-        rocker_port_eg(world_rocker(ctx->sci_table->world), ctx->out_pport,
-                       ctx->iov, ctx->iovcnt);
-    }
-}
-
 static size_t
 validate_sectag(const struct eth_header *ethhdr, const SecTAG *sectag,
                 size_t remaining, SecYContext *ctx)
@@ -966,6 +915,121 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
 
     sofar += sectag_len;
     return sofar;
+}
+
+static int build_sectag(SecYContext *ctx, struct iovec *iov, int *iovcnt)
+{
+    return 0;
+}
+
+static void secy_eg(gpointer unused, gpointer value, void *priv)
+{
+    SCCommon *sc = (SCCommon *)value;
+    TxSC *txsc;
+    SecY *secy;
+    SecYContext *in_ctx;
+    struct iovec *iov_unsec;
+    int iov_unsec_cnt, iov_sec_cnt, data_offset;
+
+    in_ctx = (SecYContext *)priv;
+    if (!sc->is_tx)
+        return;
+
+    txsc = (TxSC *)sc;
+    secy = txsc->sc_common.secy;
+    if (!secy)
+        return;
+
+    if (secy == in_ctx->secy)
+        return;
+
+    data_offset = build_sectag(in_ctx, iov_unsec, &iov_unsec_cnt);
+    struct iovec iov_sec[iov_unsec_cnt + 3];
+
+    SecYContext out_ctx = {
+        .iov = iov_sec,
+        .iovcnt = iov_sec_cnt,
+        .sci_table = in_ctx->sci_table,
+    };
+    fill_ctx(&out_ctx, iov_unsec, iov_unsec_cnt, secy, data_offset);
+
+    out_ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
+    if (secy_encrypt(&out_ctx)) {
+        return;
+    }
+
+    rocker_port_eg(world_rocker(out_ctx.sci_table->world),
+                   out_ctx.out_pport,
+                   out_ctx.iov, out_ctx.iovcnt);
+}
+
+static void rocker_flood(SecYContext *ctx)
+{
+    /* XXX: vlan obj */
+    g_hash_table_foreach(ctx->sci_table->tbl, secy_eg, ctx);
+}
+
+static void secy_ig(SecY *secy, SecYContext *ctx,
+                    const struct iovec *iov, int iovcnt, int data_offset)
+{
+    FDBEntry *entry;
+    struct eth_header *ethhdr;
+
+    /* TODO: we should provide admin interface which turns on or off the
+     * Unauthorized VLANs (IEEE 802.1X-2010 7.5.3). about the Selective
+     * Relay like WoL, see secy_world_eg().
+     */
+
+    if (iov->iov_len < sizeof(struct eth_header)) {
+        return;
+    }
+
+    ethhdr = iov->iov_base;
+    ctx->eth_header = ethhdr;
+    if (ntohs(ethhdr->h_proto) != ETH_P_MACSEC) {
+        /* As we support multi-access LAN, 'Y' function directs the received
+         * packet to the Uncontrolled Port, which is not associated to any SecY.
+         *
+         * We do not offload EAPOL. All the protocol handling, relevant state
+         * management and even basic header validation are up to the control
+         * plane, so we bypass SecY selection iff. it will be passed to the
+         * Uncontrolled Port of the selected SecY.
+         *
+         * TODO: we should do the selection here in the case of stacked ISS.
+         */
+        rx_produce(ctx->sci_table->world, ctx->in_pport, iov, iovcnt, 1);
+        return;
+    }
+
+    fill_ctx(ctx, iov, iovcnt, secy, data_offset);
+
+    if (secy_decrypt(ctx)) {
+        secy_drop(ctx);
+        return;
+    }
+
+    if (is_broadcast_ether_addr(ctx->eth_header->h_dest)) {
+        rocker_flood(ctx);
+    } else if (is_multicast_ether_addr(ctx->eth_header->h_dest)) {
+        /* XXX: implement snooping */
+        rocker_flood(ctx);
+    } else if ((entry = fdb_find(NULL)) != NULL) {
+        /* CAVEAT: we always have to externally learn, as FDB entry being
+         * not found does not mean we have to do locally on upper cpu side.
+         * Otherwise every 'Common Port' ingress time we may have to notify for
+         * safety, and it is not worth the overhead as the point is not offloading
+         * data plane, but just the MACsec protection/validation. Plus, higher layer
+         * entity could not distinguish whether tha data would be associated to
+         * the secure ISS or insecure ISS,
+         */
+        if (ctx->out_pport != ctx->in_pport) {
+            /* Maybe SecY protection on out_pport happens later on fp_port_eg. */
+            rocker_port_eg(world_rocker(ctx->sci_table->world), ctx->out_pport,
+                           ctx->iov, ctx->iovcnt);
+        }
+    } else {
+        rocker_flood(ctx);
+    }
 }
 
 static ssize_t secy_world_ig(World *world, uint32_t pport,
