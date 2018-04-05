@@ -162,6 +162,7 @@ typedef struct secy_context {
     SecY *secy;
     uint8_t an;
     SACommon *sa;
+    struct eth_header *eth_header;
     SecTAG *sectag;
     bool processing_sec;
     bool processing_icv;
@@ -775,6 +776,7 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
     }
 
     ethhdr = iov->iov_base;
+    ctx->eth_header = ethhdr;
     if (ntohs(ethhdr->h_proto) != ETH_P_MACSEC) {
         /* As we support multi-access LAN, 'Y' function directs the received
          * packet to the Uncontrolled Port, which is not associated to any SecY.
@@ -974,6 +976,7 @@ static int secy_world_eg(World *world, uint32_t pport,
     TxSC *txsc;
     SecY *secy;
     int data_offset;
+    struct eth_header *ethhdr;
 
     /* Two iovecs headroom for ether header + SECTAG and possibly vlan
      * tag which will be not-in-the-clear on wire, and one iovec ICV
@@ -991,7 +994,6 @@ static int secy_world_eg(World *world, uint32_t pport,
     data_offset = parse_sectag(&ctx, iov);
 
     if (data_offset < 0) {
-        struct eth_header *ethhdr;
         if (iov->iov_len < sizeof(struct eth_header)) {
             return -ROCKER_EINVAL;
         }
@@ -1004,6 +1006,8 @@ static int secy_world_eg(World *world, uint32_t pport,
             return ROCKER_OK;
         }
     }
+    ethhdr = iov->iov_base;
+    ctx.eth_header = ethhdr;
 
     if (!ctx.processing_sec) {
         return ROCKER_OK;
