@@ -36,6 +36,19 @@
 #define MI_LEN 12
 
 typedef uint64_t sci_t;
+
+static GHashTable *fdb_table;
+
+typedef struct fdb_key {
+    MACAddr addr;
+    uint16_t vlan_id;
+} FDBKey;
+
+typedef struct fdb_entry {
+    bool no_secy;
+    sci_t sci;
+} FDBEntry;
+
 typedef uint64_t cipher_id_t;
 
 typedef struct secy SecY;
@@ -512,14 +525,59 @@ static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
 /*
  * FDB manipulations
  */
-static int secy_fdb_add(SCITable *sci_table)
+static gboolean rocker_fdb_key_equal(gconstpointer v1, gconstpointer v2)
 {
+    FDBKey *key1 = (FDBKey *)v1;
+    FDBKey *key2 = (FDBKey *)v2;
+    return key1->addr.a[0] == key2->addr.a[0] &&
+           key1->addr.a[1] == key2->addr.a[1] &&
+           key1->addr.a[2] == key2->addr.a[2] &&
+           key1->addr.a[3] == key2->addr.a[3] &&
+           key1->addr.a[4] == key2->addr.a[4] &&
+           key1->addr.a[5] == key2->addr.a[5] &&
+           key1->vlan_id == key2->vlan_id;
+}
+
+static guint rocker_fdb_hash(gconstpointer v)
+{
+    return (guint)*(char *)v;
+}
+
+static FDBEntry *fdb_find(const FDBKey *key)
+{
+    FDBEntry *entry;
+    entry = g_hash_table_lookup(fdb_table, &key);
+    if (entry)
+        return entry;
+    return NULL;
+}
+
+static int fdb_del(const FDBKey *key)
+{
+    g_hash_table_remove(fdb_table, key);
+
     return 0;
 }
 
-static int secy_fdb_del(SCITable *sci_table)
+static int secy_fdb_add(SCITable *sci_table, const FDBKey *key, const FDBEntry *new)
 {
+    FDBEntry *old = fdb_find(key);
+
+    /* for glib <2.4 */
+    if (old) {
+        fdb_del(key);
+    }
+
+    g_hash_table_insert(fdb_table,
+                        g_strndup((char *)key, sizeof(FDBKey)),
+                        g_strndup((char *)new, sizeof(FDBEntry)));
+
     return 0;
+}
+
+static int secy_fdb_del(SCITable *sci_table, const FDBKey *key)
+{
+    return fdb_del(key);
 }
 
 /*
@@ -1057,15 +1115,31 @@ static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 
 static int secy_fdb_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 {
-    if (!tlvs[ROCKER_TLV_SECY_PPORT])
+    FDBKey key;
+    FDBEntry entry;
+    uint64_t addr;
+
+    if (!tlvs[ROCKER_TLV_SECY_PPORT] ||
+        !tlvs[ROCKER_TLV_SECY_DST_ADDR])
         return -ROCKER_EINVAL;
+
+    addr = rocker_tlv_get_u64(tlvs[ROCKER_TLV_SECY_DST_ADDR]);
+    memcpy(&key.addr, &addr, ETH_ALEN);
+    if (tlvs[ROCKER_TLV_SECY_VLAN_ID]) {
+        key.vlan_id = rocker_tlv_get_u16(tlvs[ROCKER_TLV_SECY_VLAN_ID]);
+    }
 
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_FDB_ADD:
-        secy_fdb_add(tbl);
+        if (!tlvs[ROCKER_TLV_SECY_TX_SCI]) {
+            entry.no_secy = true;
+        } else {
+            entry.sci = (sci_t)rocker_tlv_get_le64(tlvs[ROCKER_TLV_SECY_TX_SCI]);
+        }
+        secy_fdb_add(tbl, &key, &entry);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_FDB_DEL:
-        secy_fdb_del(tbl);
+        secy_fdb_del(tbl, &key);
         return -ROCKER_OK;
     }
 
@@ -1231,6 +1305,9 @@ static int secy_init(World *world)
     sci_table->tbl = g_hash_table_new_full(g_int64_hash,
                                            g_int64_equal,
                                            NULL, g_free);
+    fdb_table = g_hash_table_new_full(rocker_fdb_hash,
+                                      rocker_fdb_key_equal,
+                                      NULL, g_free);
     if (!sci_table->tbl) {
         return -ENOMEM;
     }
