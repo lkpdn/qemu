@@ -19,10 +19,6 @@
 
 #include "qemu/bitops.h"
 
-/* IEEE 802.1Q-2014 Table 8-1. Reserved Ethernet Addresses */
-static const uint8_t eth_reserved_addr_base[ETH_ALEN] =
-{ 0x01, 0x80, 0xc2, 0x00, 0x00, 0x00 };
-
 #define ROCKER_SECY_CIPHER_GCM_AES_128  (0x0080020001000001)
 #define ROCKER_SECY_DEFAULT_CIPHERSUITE ROCKER_SECY_CIPHER_GCM_AES_128
 

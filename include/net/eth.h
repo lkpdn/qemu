@@ -255,6 +255,10 @@ struct tcp_hdr {
 #define IP6_DESTINATON        (60)
 #define IP6_MOBILITY          (135)
 
+/* IEEE 802.1Q-2014 Table 8-1. Reserved Ethernet Addresses */
+static const uint8_t eth_reserved_addr_base[ETH_ALEN] =
+{ 0x01, 0x80, 0xc2, 0x00, 0x00, 0x00 };
+
 static inline int is_multicast_ether_addr(const uint8_t *addr)
 {
     return 0x01 & addr[0];
@@ -268,6 +272,15 @@ static inline int is_broadcast_ether_addr(const uint8_t *addr)
 static inline int is_unicast_ether_addr(const uint8_t *addr)
 {
     return !is_multicast_ether_addr(addr);
+}
+
+static inline int is_reserved_ether_addr(const uint8_t *addr)
+{
+    return ((eth_reserved_addr_base[0] ^ addr[0]) |
+            (eth_reserved_addr_base[1] ^ addr[1]) |
+            (eth_reserved_addr_base[2] ^ addr[2]) |
+            (eth_reserved_addr_base[3] ^ addr[3]) |
+            (eth_reserved_addr_base[4] ^ addr[4])) == 0;
 }
 
 typedef enum {
