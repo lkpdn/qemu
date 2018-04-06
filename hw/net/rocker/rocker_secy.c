@@ -1010,6 +1010,7 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
 
     if (is_broadcast_ether_addr(ctx->eth_header->h_dest)) {
         rocker_flood(ctx);
+        rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
     } else if (is_multicast_ether_addr(ctx->eth_header->h_dest)) {
         /* XXX: implement snooping */
         rocker_flood(ctx);
@@ -1029,6 +1030,7 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
         }
     } else {
         rocker_flood(ctx);
+        rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
     }
 }
 
