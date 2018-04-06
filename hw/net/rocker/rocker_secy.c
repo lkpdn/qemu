@@ -1182,7 +1182,7 @@ static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 static int secy_fdb_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 {
     FDBKey key;
-    FDBEntry entry;
+    FDBEntry entry = { 0, 0, 0 };
     uint64_t addr;
 
     if (!tlvs[ROCKER_TLV_SECY_PPORT] ||
