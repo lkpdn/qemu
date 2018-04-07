@@ -559,7 +559,7 @@ static int fdb_del(const FDBKey *key)
     return 0;
 }
 
-static int secy_fdb_add(SCITable *sci_table, const FDBKey *key, const FDBEntry *new)
+static int fdb_add(const FDBKey *key, const FDBEntry *new)
 {
     FDBEntry *old = fdb_find(key);
 
@@ -572,6 +572,40 @@ static int secy_fdb_add(SCITable *sci_table, const FDBKey *key, const FDBEntry *
                         g_strndup((char *)key, sizeof(FDBKey)),
                         g_strndup((char *)new, sizeof(FDBEntry)));
 
+    return 0;
+}
+
+static FDBEntry *secy_fdb_find(SecYContext *ctx)
+{
+    MACAddr mac_addr;
+    memcpy(&mac_addr, (uint8_t *)ctx->eth_header->h_dest, ETH_ALEN);
+    FDBKey key = {
+        .addr = mac_addr,
+        .vlan_id = 0, /* XXX: VLAN */
+    };
+    return fdb_find(&key);
+}
+
+static void secy_fdb_add(const uint32_t pport, const uint8_t *addr,
+                         const uint16_t vlan_id, bool no_secy, sci_t sci)
+{
+    MACAddr mac_addr;
+    memcpy(&mac_addr, &addr, ETH_ALEN);
+    FDBKey key = {
+        .addr = mac_addr,
+        .vlan_id = vlan_id,
+    };
+    FDBEntry entry = {
+        .no_secy = no_secy,
+        .sci = sci,
+    };
+    fdb_add(&key, &entry);
+}
+
+static int secy_fdb_update(SecYContext *ctx)
+{
+    secy_fdb_add(ctx->in_pport, (uint8_t *)ctx->eth_header->h_source,
+                 0, false, ctx->secy->sci);
     return 0;
 }
 
@@ -1017,7 +1051,7 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
     } else if (is_reserved_ether_addr(ctx->eth_header->h_dest)) {
         /* TODO: Selective forwarding */
         rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
-    } else if ((entry = fdb_find(NULL)) != NULL) {
+    } else if ((entry = secy_fdb_find(ctx)) != NULL) {
         /* CAVEAT: we always have to externally learn, as FDB entry being
          * not found does not mean we have to do locally on upper cpu side.
          * Otherwise every 'Common Port' ingress time we may have to notify for
@@ -1181,27 +1215,32 @@ static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
 static int secy_fdb_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
 {
     FDBKey key;
-    FDBEntry entry = { 0, 0, 0 };
-    uint64_t addr;
+    uint8_t addr[ETH_ALEN];
+    uint32_t pport;
+    uint64_t u64_addr;
+    __be16 vlan_id = 0;
+    sci_t sci;
 
     if (!tlvs[ROCKER_TLV_SECY_PPORT] ||
         !tlvs[ROCKER_TLV_SECY_DST_ADDR])
         return -ROCKER_EINVAL;
 
-    addr = rocker_tlv_get_u64(tlvs[ROCKER_TLV_SECY_DST_ADDR]);
-    memcpy(&key.addr, &addr, ETH_ALEN);
+    pport = rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_PPORT]);
+    u64_addr = rocker_tlv_get_u64(tlvs[ROCKER_TLV_SECY_DST_ADDR]);
+    memcpy(addr, &u64_addr, ETH_ALEN);
+
     if (tlvs[ROCKER_TLV_SECY_VLAN_ID]) {
-        key.vlan_id = rocker_tlv_get_u16(tlvs[ROCKER_TLV_SECY_VLAN_ID]);
+        vlan_id = rocker_tlv_get_u16(tlvs[ROCKER_TLV_SECY_VLAN_ID]);
     }
 
     switch (cmd) {
     case ROCKER_TLV_CMD_TYPE_SECY_FDB_ADD:
         if (!tlvs[ROCKER_TLV_SECY_TX_SCI]) {
-            entry.no_secy = true;
+            secy_fdb_add(pport, addr, vlan_id, true, 0);
         } else {
-            entry.sci = (sci_t)rocker_tlv_get_le64(tlvs[ROCKER_TLV_SECY_TX_SCI]);
+            sci = (sci_t)rocker_tlv_get_le64(tlvs[ROCKER_TLV_SECY_TX_SCI]);
+            secy_fdb_add(pport, addr, vlan_id, false, sci);
         }
-        secy_fdb_add(tbl, &key, &entry);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_FDB_DEL:
         secy_fdb_del(tbl, &key);
