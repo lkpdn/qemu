@@ -1014,6 +1014,9 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
     } else if (is_multicast_ether_addr(ctx->eth_header->h_dest)) {
         /* XXX: implement snooping */
         rocker_flood(ctx);
+    } else if (is_reserved_ether_addr(ctx->eth_header->h_dest)) {
+        /* TODO: Selective forwarding */
+        rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
     } else if ((entry = fdb_find(NULL)) != NULL) {
         /* CAVEAT: we always have to externally learn, as FDB entry being
          * not found does not mean we have to do locally on upper cpu side.
