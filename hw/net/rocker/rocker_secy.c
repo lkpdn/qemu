@@ -1042,6 +1042,9 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
         return;
     }
 
+    /* XXX: vlan */
+    secy_fdb_update(ctx);
+
     if (is_broadcast_ether_addr(ctx->eth_header->h_dest)) {
         rocker_flood(ctx);
         rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
