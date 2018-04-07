@@ -176,6 +176,7 @@ typedef struct secy_context {
     uint8_t an;
     SACommon *sa;
     struct eth_header *eth_header;
+    struct vlan_header *vlan_header;
     SecTAG *sectag;
     bool processing_sec;
     bool processing_icv;
@@ -581,7 +582,8 @@ static FDBEntry *secy_fdb_find(SecYContext *ctx)
     memcpy(&mac_addr, (uint8_t *)ctx->eth_header->h_dest, ETH_ALEN);
     FDBKey key = {
         .addr = mac_addr,
-        .vlan_id = 0, /* XXX: VLAN */
+        .vlan_id = !ctx->vlan_header ? 0 : /* XXX: native */
+                   be16_to_cpu(ctx->vlan_header->h_tci) & VLAN_VID_MASK,
     };
     return fdb_find(&key);
 }
@@ -1042,7 +1044,12 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
         return;
     }
 
-    /* XXX: vlan */
+    switch (ntohs(ethhdr->h_proto)) {
+    case ETH_P_VLAN:
+    case ETH_P_DVLAN:
+        ctx->vlan_header = ctx->iov[1].iov_base;
+    }
+
     secy_fdb_update(ctx);
 
     if (is_broadcast_ether_addr(ctx->eth_header->h_dest)) {
