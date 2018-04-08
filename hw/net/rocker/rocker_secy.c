@@ -1005,11 +1005,14 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     if (secy == in_ctx->secy)
         return;
 
+    out_ctx.an = txsc->encoding_sa;
+    out_ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
+    if (!out_ctx.sa)
+        return;
+
     out_ctx.iovcnt = 2;
     out_ctx.sci_table = in_ctx->sci_table;
     out_ctx.secy = secy;
-    out_ctx.an = txsc->encoding_sa;
-    out_ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
 
     /* This relies on actor's 'active' pariticipation
      * i.e., MKPDU destined to chosen EAPOL group address
@@ -1153,6 +1156,9 @@ static ssize_t secy_world_ig(World *world, uint32_t pport,
 
     ctx.secy = secy;
     ctx.sa = (SACommon *)rxsc->rxa[ctx.an];
+    if (!ctx.sa) {
+        return -1;
+    }
     secy_ig(secy, &ctx, iov, iovcnt, data_offset);
 
     notify_stats(&ctx);
@@ -1230,6 +1236,10 @@ static int secy_world_eg(World *world, uint32_t pport,
     fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
 
     ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
+    if (!ctx.sa) {
+        return -ROCKER_EINVAL;
+    }
+
     if (secy_encrypt(&ctx)) {
         return -ROCKER_EINVAL;
     }
