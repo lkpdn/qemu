@@ -953,9 +953,37 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
     return sofar;
 }
 
-static int build_sectag(SecYContext *ctx, struct iovec *iov, int *iovcnt)
+static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint32_t pn)
 {
+    size_t data_len;
+
+    data_len = iov_size(ctx->iov, ctx->iovcnt);
+
+    /* no need to explicitly show our ES nor SCB capability.
+     * TODO: E/C */
+    sectag->tci_an = ROCKER_SECY_TCI_BIT_SC |
+                     ROCKER_SECY_TCI_BIT_E |
+                     ROCKER_SECY_TCI_BIT_C;
+    if (data_len < 48) {
+        sectag->short_len = data_len;
+    }
+
+    sectag->pn = htonl(pn);
+    sectag->sci = htonl(ctx->secy->sci);
+
     return 0;
+}
+
+static void fill_macsec_header(SecYContext *in_ctx, struct iovec *iov, uint32_t pn)
+{
+    SecTAG *sectag;
+
+    iov->iov_len = sizeof(struct eth_header) + sizeof(SecTAG);
+    iov->iov_base = g_malloc0(iov->iov_len);
+    memcpy(iov->iov_base, in_ctx->eth_header, sizeof(struct eth_header));
+
+    sectag = iov->iov_base + sizeof(struct eth_header);
+    fill_sectag(in_ctx, sectag, pn);
 }
 
 static void secy_eg(gpointer unused, gpointer value, void *priv)
@@ -963,9 +991,7 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     SCCommon *sc = (SCCommon *)value;
     TxSC *txsc;
     SecY *secy;
-    SecYContext *in_ctx;
-    struct iovec *iov_unsec;
-    int iov_unsec_cnt, iov_sec_cnt, data_offset;
+    SecYContext *in_ctx, out_ctx;
 
     in_ctx = (SecYContext *)priv;
     if (!sc->is_tx)
@@ -979,17 +1005,22 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     if (secy == in_ctx->secy)
         return;
 
-    data_offset = build_sectag(in_ctx, iov_unsec, &iov_unsec_cnt);
-    struct iovec iov_sec[iov_unsec_cnt + 3];
-
-    SecYContext out_ctx = {
-        .iov = iov_sec,
-        .iovcnt = iov_sec_cnt,
-        .sci_table = in_ctx->sci_table,
-    };
-    fill_ctx(&out_ctx, iov_unsec, iov_unsec_cnt, secy, data_offset);
-
+    out_ctx.iovcnt = 2;
+    out_ctx.sci_table = in_ctx->sci_table;
+    out_ctx.secy = secy;
+    out_ctx.an = txsc->encoding_sa;
     out_ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
+    out_ctx.sa->next_pn++; /* XXX */
+
+    /* XXX: clean up */
+    struct iovec iov[2];
+    fill_macsec_header(in_ctx, &iov[0], out_ctx.sa->next_pn);
+    iov[1].iov_len = iov_size(in_ctx->iov, in_ctx->iovcnt);
+    iov[1].iov_base = g_malloc0(iov[1].iov_len);
+    iov_to_buf_full(in_ctx->iov, in_ctx->iovcnt, 0,
+                    iov[1].iov_base, iov[1].iov_len);
+    out_ctx.iov = iov;
+
     if (secy_encrypt(&out_ctx)) {
         return;
     }
