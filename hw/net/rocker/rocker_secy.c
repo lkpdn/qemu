@@ -1010,7 +1010,14 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     out_ctx.secy = secy;
     out_ctx.an = txsc->encoding_sa;
     out_ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
-    out_ctx.sa->next_pn++; /* XXX */
+
+    /* This relies on actor's 'active' pariticipation
+     * i.e., MKPDU destined to chosen EAPOL group address
+     * goes up to the Control Plane, and finally recognises PN
+     * exhaustion. Another option would be notifying stat via
+     * MSI-X periodically. About 'active' paritipation, see:
+     * IEEE 802.1Xbx-2014 12.5.2 */
+    out_ctx.sa->next_pn++;
 
     /* XXX: clean up */
     struct iovec iov[2];
