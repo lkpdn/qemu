@@ -953,23 +953,17 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
     return sofar;
 }
 
-static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint32_t pn)
+static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint32_t pn,
+                       sci_t sci)
 {
-    size_t data_len;
-
-    data_len = iov_size(ctx->iov, ctx->iovcnt);
-
     /* no need to explicitly show our ES nor SCB capability.
      * TODO: E/C */
     sectag->tci_an = ROCKER_SECY_TCI_BIT_SC |
                      ROCKER_SECY_TCI_BIT_E |
                      ROCKER_SECY_TCI_BIT_C;
-    if (data_len < 48) {
-        sectag->short_len = data_len;
-    }
-
+    sectag->tci_an |= ctx->an;
     sectag->pn = htonl(pn);
-    sectag->sci = htonl(ctx->secy->sci);
+    sectag->sci = sci;
 
     return 0;
 }
@@ -983,21 +977,31 @@ static void fill_out_ctx(SecYContext *in_ctx, SecYContext *out_ctx)
 
     out_ctx->iov[0].iov_len = headroom_len;
     out_ctx->iov[0].iov_base = g_malloc0(headroom_len);
-    memcpy(out_ctx->iov[0].iov_base, in_ctx->eth_header,
-           sizeof(struct eth_header));
-    out_ctx->eth_header = out_ctx->iov[0].iov_base;
+    out_ctx->iov[1].iov_len = 2 + in_ctx->iov[1].iov_len;
+    out_ctx->iov[1].iov_base = g_malloc0(out_ctx->iov[1].iov_len);
 
+    memcpy(out_ctx->iov[0].iov_base, in_ctx->eth_header,
+           ETH_ALEN * 2);
+    out_ctx->eth_header = out_ctx->iov[0].iov_base;
+    out_ctx->eth_header->h_proto = htons(ETH_P_MACSEC);
     sectag = out_ctx->iov[0].iov_base + sizeof(struct eth_header);
     out_ctx->sectag = sectag;
+    fill_sectag(in_ctx, sectag, out_ctx->sa->next_pn, out_ctx->secy->sci);
 
-    fill_sectag(in_ctx, sectag, out_ctx->sa->next_pn);
+    memcpy(out_ctx->iov[1].iov_base, &in_ctx->eth_header->h_proto, 2);
+    memcpy(out_ctx->iov[1].iov_base + 2, in_ctx->iov[1].iov_base,
+           in_ctx->iov[1].iov_len);
+}
 
-    /* fill user data
-     * TODO: do not copy */
-    out_ctx->iov[1].iov_len = iov_size(in_ctx->iov, in_ctx->iovcnt);
-    out_ctx->iov[1].iov_base = g_malloc0(out_ctx->iov[1].iov_len);
-    iov_to_buf_full(in_ctx->iov, in_ctx->iovcnt, 0,
-                    out_ctx->iov[1].iov_base, out_ctx->iov[1].iov_len);
+static void fill_out_ctx_finish(SecYContext *out_ctx)
+{
+    size_t data_len;
+
+    data_len = out_ctx->iov[1].iov_len;
+    data_len -= out_ctx->secy->current_ciphersuite->icv_len;
+    if (data_len < 48) {
+        out_ctx->sectag->short_len = data_len;
+    }
 }
 
 static void secy_eg(gpointer unused, gpointer value, void *priv)
@@ -1027,6 +1031,7 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     out_ctx.iovcnt = 2;
     out_ctx.sci_table = in_ctx->sci_table;
     out_ctx.secy = secy;
+    out_ctx.out_pport = secy->pport;
 
     /* This relies on actor's 'active' pariticipation
      * i.e., MKPDU destined to chosen EAPOL group address
@@ -1041,6 +1046,8 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     if (secy_encrypt(&out_ctx)) {
         return;
     }
+
+    fill_out_ctx_finish(&out_ctx);
 
     rocker_port_eg(world_rocker(out_ctx.sci_table->world),
                    out_ctx.out_pport,
