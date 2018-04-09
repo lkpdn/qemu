@@ -379,6 +379,7 @@ static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
 
     g_free(ctx->iov[1].iov_base);
     ctx->iov[1].iov_base = out_iovec.iov_base;
+    ctx->iov[1].iov_len = sec_len + tag_len;
 
     return ROCKER_SECY_CRYPTO_OK;
 
