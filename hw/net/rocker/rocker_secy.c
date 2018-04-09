@@ -665,11 +665,11 @@ static int txsc_add(SCITable *sci_table, sci_t sci, SecY *secy)
     tx_sc->sc_common.sci = sci;
     tx_sc->sc_common.is_tx = true;
 
-    g_hash_table_insert(sci_table->tbl, &(tx_sc->sc_common.sci), tx_sc);
-
     tx_sc->sc_common.secy = secy;
     tx_sc->txa = g_malloc0_n(MACSEC_NUM_AN, sizeof(TxSA *));
     secy->tx_sc = tx_sc;
+
+    g_hash_table_insert(sci_table->tbl, &(tx_sc->sc_common.sci), tx_sc);
     return 0;
 }
 
@@ -687,11 +687,11 @@ static int rxsc_add(SCITable *sci_table, sci_t sci, sci_t tx_sci, SecY *secy)
     rx_sc->sc_common.is_tx = false;
     rx_sc->tx_sci = tx_sci;
 
-    g_hash_table_insert(sci_table->tbl, &(rx_sc->sc_common.sci), rx_sc);
-
     QLIST_INSERT_HEAD(&secy->rx_scs, rx_sc, next);
     rx_sc->rxa = g_malloc0_n(MACSEC_NUM_AN, sizeof(RxSA *));
     rx_sc->sc_common.secy = secy;
+
+    g_hash_table_insert(sci_table->tbl, &(rx_sc->sc_common.sci), rx_sc);
     return 0;
 }
 
