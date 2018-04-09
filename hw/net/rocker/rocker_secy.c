@@ -974,16 +974,30 @@ static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint32_t pn)
     return 0;
 }
 
-static void fill_macsec_header(SecYContext *in_ctx, struct iovec *iov, uint32_t pn)
+static void fill_out_ctx(SecYContext *in_ctx, SecYContext *out_ctx)
 {
     SecTAG *sectag;
 
-    iov->iov_len = sizeof(struct eth_header) + sizeof(SecTAG);
-    iov->iov_base = g_malloc0(iov->iov_len);
-    memcpy(iov->iov_base, in_ctx->eth_header, sizeof(struct eth_header));
+    out_ctx->iov = g_malloc0_n(2, sizeof(struct iovec));
+    size_t headroom_len = sizeof(struct eth_header) + sizeof(SecTAG);
 
-    sectag = iov->iov_base + sizeof(struct eth_header);
-    fill_sectag(in_ctx, sectag, pn);
+    out_ctx->iov[0].iov_len = headroom_len;
+    out_ctx->iov[0].iov_base = g_malloc0(headroom_len);
+    memcpy(out_ctx->iov[0].iov_base, in_ctx->eth_header,
+           sizeof(struct eth_header));
+    out_ctx->eth_header = out_ctx->iov[0].iov_base;
+
+    sectag = out_ctx->iov[0].iov_base + sizeof(struct eth_header);
+    out_ctx->sectag = sectag;
+
+    fill_sectag(in_ctx, sectag, out_ctx->sa->next_pn);
+
+    /* fill user data
+     * TODO: do not copy */
+    out_ctx->iov[1].iov_len = iov_size(in_ctx->iov, in_ctx->iovcnt);
+    out_ctx->iov[1].iov_base = g_malloc0(out_ctx->iov[1].iov_len);
+    iov_to_buf_full(in_ctx->iov, in_ctx->iovcnt, 0,
+                    out_ctx->iov[1].iov_base, out_ctx->iov[1].iov_len);
 }
 
 static void secy_eg(gpointer unused, gpointer value, void *priv)
@@ -1022,14 +1036,7 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
      * IEEE 802.1Xbx-2014 12.5.2 */
     out_ctx.sa->next_pn++;
 
-    /* XXX: clean up */
-    struct iovec iov[2];
-    fill_macsec_header(in_ctx, &iov[0], out_ctx.sa->next_pn);
-    iov[1].iov_len = iov_size(in_ctx->iov, in_ctx->iovcnt);
-    iov[1].iov_base = g_malloc0(iov[1].iov_len);
-    iov_to_buf_full(in_ctx->iov, in_ctx->iovcnt, 0,
-                    iov[1].iov_base, iov[1].iov_len);
-    out_ctx.iov = iov;
+    fill_out_ctx(in_ctx, &out_ctx);
 
     if (secy_encrypt(&out_ctx)) {
         return;
