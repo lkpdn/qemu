@@ -277,10 +277,16 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 {
     __be32 pn;
     uint8_t iv[12];
-    size_t tag_len;
+    size_t in_len, tag_len;
     Error *err = NULL;
 
     tag_len = cs->icv_len;
+    if (ctx->is_eg) {
+        in_len = ctx->iov[1].iov_len;
+    } else {
+        in_len = ctx->iov[1].iov_len - tag_len;
+    }
+
     if (ctx->sectag && ctx->sectag->pn) {
         pn = ctx->sectag->pn;
     } else {
@@ -295,7 +301,7 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     }
 
     if (qcrypto_aead_set_nonce(ctx->sa->sak.cipher, iv, ARRAY_SIZE(iv),
-                               ctx->iov[0].iov_len, ctx->iov[1].iov_len - tag_len,
+                               ctx->iov[0].iov_len, in_len,
                                tag_len, &err)) {
         return -ROCKER_SECY_CRYPTO_ERR;
     }
