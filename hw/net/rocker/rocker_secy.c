@@ -954,15 +954,15 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
     return sofar;
 }
 
-static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint32_t pn,
-                       sci_t sci)
+static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint8_t an,
+                       uint32_t pn, sci_t sci)
 {
     /* no need to explicitly show our ES nor SCB capability.
      * TODO: E/C */
     sectag->tci_an = ROCKER_SECY_TCI_BIT_SC |
                      ROCKER_SECY_TCI_BIT_E |
                      ROCKER_SECY_TCI_BIT_C;
-    sectag->tci_an |= ctx->an;
+    sectag->tci_an |= an;
     sectag->pn = htonl(pn);
     sectag->sci = sci;
 
@@ -987,7 +987,8 @@ static void fill_out_ctx(SecYContext *in_ctx, SecYContext *out_ctx)
     out_ctx->eth_header->h_proto = htons(ETH_P_MACSEC);
     sectag = out_ctx->iov[0].iov_base + sizeof(struct eth_header);
     out_ctx->sectag = sectag;
-    fill_sectag(in_ctx, sectag, out_ctx->sa->next_pn, out_ctx->secy->sci);
+    fill_sectag(in_ctx, sectag, out_ctx->an, out_ctx->sa->next_pn,
+                out_ctx->secy->sci);
 
     memcpy(out_ctx->iov[1].iov_base, &in_ctx->eth_header->h_proto, 2);
     memcpy(out_ctx->iov[1].iov_base + 2, in_ctx->iov[1].iov_base,
