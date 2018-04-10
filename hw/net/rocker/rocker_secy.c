@@ -296,6 +296,10 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     memcpy(iv, &ctx->sci, 8);
     memcpy(&iv[8], &pn, 4);
 
+    if (!ctx->sa->sak.cipher) {
+        return -ROCKER_SECY_CRYPTO_ERR;
+    }
+
     if (qcrypto_aead_reset(ctx->sa->sak.cipher, &err)) {
         return -ROCKER_SECY_CRYPTO_ERR;
     }
