@@ -178,6 +178,7 @@ typedef struct secy_context {
     struct eth_header *eth_header;
     struct vlan_header *vlan_header;
     SecTAG *sectag;
+    bool is_eg;
     bool processing_sec;
     bool processing_icv;
     sci_t sci;
@@ -1025,6 +1026,7 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     if (secy == in_ctx->secy)
         return;
 
+    out_ctx.is_eg = true;
     out_ctx.an = txsc->encoding_sa;
     out_ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
     if (!out_ctx.sa)
@@ -1149,6 +1151,7 @@ static ssize_t secy_world_ig(World *world, uint32_t pport,
     struct iovec iov_copy[iovcnt + 2];
 
     SecYContext ctx = {
+        .is_eg = false,
         .in_pport = pport,
         .iov = iov_copy,
         .iovcnt = iovcnt + 2,
@@ -1216,6 +1219,7 @@ static int secy_world_eg(World *world, uint32_t pport,
     struct iovec iov_copy[iovcnt + 3];
 
     SecYContext ctx = {
+        .is_eg = true,
         .out_pport = pport,
         .iov = iov_copy,
         .iovcnt = iovcnt,
