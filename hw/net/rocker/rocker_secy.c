@@ -968,6 +968,8 @@ parse_sectag(struct secy_context *ctx, const struct iovec *iov)
 static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint8_t an,
                        uint32_t pn, sci_t sci)
 {
+    size_t data_len;
+
     /* no need to explicitly show our ES nor SCB capability.
      * TODO: E/C */
     sectag->tci_an = ROCKER_SECY_TCI_BIT_SC |
@@ -976,6 +978,11 @@ static int fill_sectag(SecYContext *ctx, SecTAG *sectag, uint8_t an,
     sectag->tci_an |= an;
     sectag->pn = htonl(pn);
     sectag->sci = sci;
+
+    data_len = ROUND_UP(ctx->iov[1].iov_len, 16);
+    if (data_len < 48) {
+        sectag->short_len = data_len;
+    }
 
     return 0;
 }
@@ -1004,17 +1011,6 @@ static void fill_out_ctx(SecYContext *in_ctx, SecYContext *out_ctx)
     memcpy(out_ctx->iov[1].iov_base, &in_ctx->eth_header->h_proto, 2);
     memcpy(out_ctx->iov[1].iov_base + 2, in_ctx->iov[1].iov_base,
            in_ctx->iov[1].iov_len);
-}
-
-static void fill_out_ctx_finish(SecYContext *out_ctx)
-{
-    size_t data_len;
-
-    data_len = out_ctx->iov[1].iov_len;
-    data_len -= out_ctx->secy->current_ciphersuite->icv_len;
-    if (data_len < 48) {
-        out_ctx->sectag->short_len = data_len;
-    }
 }
 
 static void secy_eg(gpointer unused, gpointer value, void *priv)
@@ -1060,8 +1056,6 @@ static void secy_eg(gpointer unused, gpointer value, void *priv)
     if (secy_encrypt(&out_ctx)) {
         return;
     }
-
-    fill_out_ctx_finish(&out_ctx);
 
     rocker_port_eg(world_rocker(out_ctx.sci_table->world),
                    out_ctx.out_pport,
