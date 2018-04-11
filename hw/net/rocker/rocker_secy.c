@@ -363,19 +363,19 @@ err_out:
 static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
-    int sec_len, tag_len;
+    int unsec_len, sec_len, tag_len;
     struct iovec out_iovec;
     Error *err = NULL;
 
-    sec_len = ctx->iov[1].iov_len;
+    unsec_len = ctx->iov[1].iov_len;
+    sec_len = ROUND_UP(unsec_len, 16);
     tag_len = cs->icv_len;
 
-    out_iovec.iov_base = g_malloc0(sec_len + tag_len);
     out_iovec.iov_len  = sec_len + tag_len;
+    out_iovec.iov_base = g_malloc0(sec_len + tag_len);
 
     ret = qcrypto_aead_encrypt(ctx->sa->sak.cipher, ctx->iov[1].iov_base,
-                               sec_len, out_iovec.iov_base,
-                               sec_len, &err);
+                               unsec_len, out_iovec.iov_base, sec_len, &err);
     if (ret) {
         error_report_err(err);
         goto err_out;
@@ -390,7 +390,7 @@ static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
 
     g_free(ctx->iov[1].iov_base);
     ctx->iov[1].iov_base = out_iovec.iov_base;
-    ctx->iov[1].iov_len = sec_len + tag_len;
+    ctx->iov[1].iov_len = out_iovec.iov_len;
 
     return ROCKER_SECY_CRYPTO_OK;
 
