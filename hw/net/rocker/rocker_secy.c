@@ -281,11 +281,7 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     Error *err = NULL;
 
     tag_len = cs->icv_len;
-    if (ctx->is_eg) {
-        in_len = ctx->iov[1].iov_len;
-    } else {
-        in_len = ctx->iov[1].iov_len - tag_len;
-    }
+    in_len = ctx->iov[1].iov_len;
 
     if (ctx->sectag && ctx->sectag->pn) {
         pn = ctx->sectag->pn;
