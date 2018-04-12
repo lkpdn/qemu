@@ -195,6 +195,16 @@ typedef struct ciphersuite {
     int (*encrypt)(CipherSuite *cs, SecYContext *ctx);
 } CipherSuite;
 
+static void secy_context_free(SecYContext *ctx)
+{
+    int i;
+
+    for (i = 0; i < ctx->iovcnt; i++) {
+        g_free(&ctx->iov[i]);
+    }
+    g_free(ctx->iov);
+}
+
 /*
  * MACsec Virtual Ports Manipulations
  */
@@ -1124,6 +1134,7 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
     } else if (is_multicast_ether_addr(ctx->eth_header->h_dest)) {
         /* XXX: implement snooping */
         rocker_flood(ctx);
+        secy_context_free(ctx);
     } else if (is_reserved_ether_addr(ctx->eth_header->h_dest)) {
         /* TODO: Selective forwarding */
         rx_produce(ctx->sci_table->world, ctx->in_pport, ctx->iov, ctx->iovcnt, 1);
