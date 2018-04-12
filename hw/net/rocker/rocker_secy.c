@@ -289,7 +289,7 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
         pn = cpu_to_be32(ctx->sa->next_pn);
     }
 
-    memcpy(iv, &ctx->sci, 8);
+    memcpy(iv, &ctx->sectag->sci, 8);
     memcpy(&iv[8], &pn, 4);
 
     if (!ctx->sa->sak.cipher) {
