@@ -992,10 +992,10 @@ static void fill_out_ctx(SecYContext *in_ctx, SecYContext *out_ctx)
 
     out_ctx->iov[0].iov_len = headroom_len;
     out_ctx->iov[0].iov_base = g_malloc0(headroom_len);
-    out_ctx->iov[1].iov_len = 2 + in_ctx->iov[1].iov_len;
+    out_ctx->iov[1].iov_len = in_ctx->iov[1].iov_len;
     out_ctx->iov[1].iov_base = g_malloc0(out_ctx->iov[1].iov_len);
 
-    memcpy(out_ctx->iov[0].iov_base, in_ctx->eth_header,
+    memcpy(out_ctx->iov[0].iov_base, in_ctx->iov[0].iov_base,
            ETH_ALEN * 2);
     out_ctx->eth_header = out_ctx->iov[0].iov_base;
     out_ctx->eth_header->h_proto = htons(ETH_P_MACSEC);
@@ -1004,8 +1004,7 @@ static void fill_out_ctx(SecYContext *in_ctx, SecYContext *out_ctx)
     fill_sectag(in_ctx, sectag, out_ctx->an, out_ctx->sa->next_pn,
                 out_ctx->secy->sci);
 
-    memcpy(out_ctx->iov[1].iov_base, &in_ctx->eth_header->h_proto, 2);
-    memcpy(out_ctx->iov[1].iov_base + 2, in_ctx->iov[1].iov_base,
+    memcpy(out_ctx->iov[1].iov_base, in_ctx->iov[1].iov_base,
            in_ctx->iov[1].iov_len);
 }
 
