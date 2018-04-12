@@ -1272,6 +1272,7 @@ static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
     SecY *secy;
     TxSC *tx_sc;
     RxSC *rx_sc;
+    QCryptoAead *cipher;
 
     if ((tx_sc = txsc_find(tbl, sci)) != NULL) {
         secy = tx_sc->sc_common.secy;
@@ -1285,7 +1286,12 @@ static int secy_install_sak(SCITable *tbl, sci_t sci, int an, uint8_t *key)
         return -1;
     }
 
-    sak->cipher = alloc_cipher_context(secy->current_ciphersuite->id, key);
+    cipher = alloc_cipher_context(secy->current_ciphersuite->id, key);
+    if (!cipher) {
+        return -1;
+    }
+
+    sak->cipher = cipher;
     return 0;
 }
 
