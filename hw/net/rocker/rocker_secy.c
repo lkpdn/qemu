@@ -200,9 +200,8 @@ static void secy_context_free(SecYContext *ctx)
     int i;
 
     for (i = 0; i < ctx->iovcnt; i++) {
-        g_free(&ctx->iov[i]);
+        g_free(ctx->iov[i].iov_base);
     }
-    g_free(ctx->iov);
 }
 
 /*
@@ -618,7 +617,7 @@ static void secy_fdb_add(const uint32_t pport, const uint8_t *addr,
                          const uint16_t vlan_id, bool no_secy, sci_t sci)
 {
     MACAddr mac_addr;
-    memcpy(&mac_addr, &addr, ETH_ALEN);
+    memcpy(&mac_addr, addr, ETH_ALEN);
     FDBKey key = {
         .addr = mac_addr,
         .vlan_id = vlan_id,
