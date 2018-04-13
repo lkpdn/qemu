@@ -539,7 +539,6 @@ static int fill_ctx(SecYContext *ctx, const struct iovec *iov, int iovcnt,
     ctx->iov[0].iov_len = data_offset;
     ctx->iov[1].iov_base = g_malloc0(in_len - data_offset);
     ctx->iov[1].iov_len = in_len - data_offset;
-    ctx->iovcnt = 2;
 
     iov_to_buf(iov, iovcnt, 0, ctx->iov[0].iov_base, data_offset);
     iov_to_buf(iov, iovcnt, data_offset, ctx->iov[1].iov_base,
@@ -1165,13 +1164,13 @@ static ssize_t secy_world_ig(World *world, uint32_t pport,
     SecY *secy;
     int data_offset;
 
-    struct iovec iov_copy[iovcnt + 2];
+    struct iovec iov_copy[2];
 
     SecYContext ctx = {
         .is_eg = false,
         .in_pport = pport,
         .iov = iov_copy,
-        .iovcnt = iovcnt + 2,
+        .iovcnt = 2,
         .sci_table = sci_table,
     };
 
