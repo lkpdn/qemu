@@ -587,15 +587,17 @@ static int fdb_del(const FDBKey *key)
 static int fdb_add(const FDBKey *key, const FDBEntry *new)
 {
     FDBEntry *old = fdb_find(key);
+    FDBKey *e_key = g_malloc0(sizeof(FDBKey));
+    FDBEntry *e_val = g_malloc0(sizeof(FDBEntry));
 
     /* for glib <2.4 */
     if (old) {
         fdb_del(key);
     }
 
-    g_hash_table_insert(fdb_table,
-                        g_strndup((char *)key, sizeof(FDBKey)),
-                        g_strndup((char *)new, sizeof(FDBEntry)));
+    memcpy(e_key, key, sizeof(FDBEntry));
+    memcpy(e_val, new, sizeof(FDBEntry));
+    g_hash_table_insert(fdb_table, e_key, e_val);
 
     return 0;
 }
