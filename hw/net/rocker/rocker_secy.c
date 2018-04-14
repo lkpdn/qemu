@@ -191,6 +191,7 @@ typedef struct ciphersuite {
     bool confidentiality_protection;
     int icv_len;
     uint8_t salt[12];
+    void (*fill_iv)(CipherSuite *cs, SecYContext *ctx, uint8_t *iv);
     int (*set_nonce)(CipherSuite *cs, SecYContext *ctx);
     int (*decrypt)(CipherSuite *cs, SecYContext *ctx);
     int (*encrypt)(CipherSuite *cs, SecYContext *ctx);
@@ -283,15 +284,9 @@ static LgPortOps secy_lg_ops = {
 /*
  * For secure frame generation/validation
  */
-static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
+static void gcm_aes_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
 {
     __be32 pn;
-    uint8_t iv[12];
-    size_t in_len, tag_len;
-    Error *err = NULL;
-
-    tag_len = cs->icv_len;
-    in_len = ctx->iov[1].iov_len;
 
     if (ctx->sectag && ctx->sectag->pn) {
         pn = ctx->sectag->pn;
@@ -301,6 +296,18 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 
     memcpy(iv, &ctx->sectag->sci, 8);
     memcpy(&iv[8], &pn, 4);
+}
+
+static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
+{
+    uint8_t iv[12];
+    size_t in_len, tag_len;
+    Error *err = NULL;
+
+    tag_len = cs->icv_len;
+    in_len = ctx->iov[1].iov_len;
+
+    cs->fill_iv(cs, ctx, iv);
 
     if (!ctx->sa->sak.cipher) {
         return -ROCKER_SECY_CRYPTO_ERR;
@@ -428,6 +435,10 @@ static int gcm_aes_256_encrypt(CipherSuite *cs, SecYContext *ctx)
     return ROCKER_SECY_CRYPTO_OK;
 }
 
+static void gcm_aes_xpn_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
+{
+}
+
 static int gcm_aes_xpn_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
 {
     return ROCKER_SECY_CRYPTO_OK;
@@ -464,6 +475,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .fill_iv                    = gcm_aes_fill_iv,
     .set_nonce                  = gcm_aes_128_set_nonce,
     .decrypt                    = gcm_aes_128_decrypt,
     .encrypt                    = gcm_aes_128_encrypt,
@@ -473,6 +485,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .fill_iv                    = gcm_aes_fill_iv,
     .set_nonce                  = gcm_aes_256_set_nonce,
     .decrypt                    = gcm_aes_256_decrypt,
     .encrypt                    = gcm_aes_256_encrypt,
@@ -482,6 +495,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .fill_iv                    = gcm_aes_xpn_fill_iv,
     .set_nonce                  = gcm_aes_xpn_128_set_nonce,
     .decrypt                    = gcm_aes_xpn_128_decrypt,
     .encrypt                    = gcm_aes_xpn_128_encrypt,
@@ -491,6 +505,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .fill_iv                    = gcm_aes_xpn_fill_iv,
     .set_nonce                  = gcm_aes_xpn_256_set_nonce,
     .decrypt                    = gcm_aes_xpn_256_decrypt,
     .encrypt                    = gcm_aes_xpn_256_encrypt,
