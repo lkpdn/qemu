@@ -571,7 +571,7 @@ static guint rocker_fdb_hash(gconstpointer v)
 static FDBEntry *fdb_find(const FDBKey *key)
 {
     FDBEntry *entry;
-    entry = g_hash_table_lookup(fdb_table, &key);
+    entry = g_hash_table_lookup(fdb_table, key);
     if (entry)
         return entry;
     return NULL;
