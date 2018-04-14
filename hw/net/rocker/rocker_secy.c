@@ -458,7 +458,7 @@ static int gcm_aes_xpn_256_encrypt(CipherSuite *cs, SecYContext *ctx)
 }
 
 static CipherSuite ciphersuites[] = { {
-    .id                         = 0x0080020001000001,
+    .id                         = 0x0080C20001000001,
     .name                       = "GCM-AES-128",
     .integrity_protection       = true,
     .confidentiality_protection = true,
@@ -467,7 +467,7 @@ static CipherSuite ciphersuites[] = { {
     .decrypt                    = gcm_aes_128_decrypt,
     .encrypt                    = gcm_aes_128_encrypt,
 }, {
-    .id                         = 0x0080020001000002,
+    .id                         = 0x0080C20001000002,
     .name                       = "GCM-AES-256",
     .integrity_protection       = true,
     .confidentiality_protection = true,
@@ -476,7 +476,7 @@ static CipherSuite ciphersuites[] = { {
     .decrypt                    = gcm_aes_256_decrypt,
     .encrypt                    = gcm_aes_256_encrypt,
 }, {
-    .id                         = 0x0080020001000003,
+    .id                         = 0x0080C20001000003,
     .name                       = "GCM-AES-XPN-128",
     .integrity_protection       = true,
     .confidentiality_protection = true,
@@ -485,7 +485,7 @@ static CipherSuite ciphersuites[] = { {
     .decrypt                    = gcm_aes_xpn_128_decrypt,
     .encrypt                    = gcm_aes_xpn_128_encrypt,
 }, {
-    .id                         = 0x0080020001000004,
+    .id                         = 0x0080C20001000004,
     .name                       = "GCM-AES-XPN-256",
     .integrity_protection       = true,
     .confidentiality_protection = true,
