@@ -1147,10 +1147,11 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
          * entity could not distinguish whether tha data would be associated to
          * the secure ISS or insecure ISS,
          */
+
+        SecY *out_secy = secy_find(ctx->sci_table, entry->sci);
+        ctx->out_pport = out_secy->pport;
         if (ctx->out_pport != ctx->in_pport) {
-            /* Maybe SecY protection on out_pport happens later on fp_port_eg. */
-            rocker_port_eg(world_rocker(ctx->sci_table->world), ctx->out_pport,
-                           ctx->iov, ctx->iovcnt);
+            secy_eg(NULL, out_secy->tx_sc, ctx);
         }
     } else {
         rocker_flood(ctx);
@@ -1225,16 +1226,13 @@ static int secy_world_eg(World *world, uint32_t pport,
                          struct iovec *new_iov, int *new_iovcnt)
 {
     SCITable *sci_table = world_private(world);
-    TxSC *txsc;
-    SecY *secy;
     int data_offset;
-    struct eth_header *ethhdr;
 
     /* Two iovecs headroom for ether header + SECTAG and possibly vlan
      * tag which will be not-in-the-clear on wire, and one iovec ICV
      * in tailroom.
      */
-    struct iovec iov_copy[iovcnt + 3];
+    struct iovec iov_copy[2];
 
     SecYContext ctx = {
         .is_eg = true,
@@ -1246,42 +1244,14 @@ static int secy_world_eg(World *world, uint32_t pport,
 
     data_offset = parse_sectag(&ctx, iov);
 
-    if (data_offset < 0) {
+    if (data_offset > 0) {
         if (iov->iov_len < sizeof(struct eth_header)) {
             return -ROCKER_EINVAL;
         }
-        ethhdr = iov->iov_base;
-        if (!is_reserved_ether_addr(ethhdr->h_dest)) {
-            return ROCKER_OK;
-        }
-    }
-    ethhdr = iov->iov_base;
-    ctx.eth_header = ethhdr;
-
-    if (!ctx.processing_sec) {
         return ROCKER_OK;
     }
 
-    txsc = txsc_find(sci_table, ctx.sci);
-    if (!txsc) {
-        return -ROCKER_EINVAL;
-    }
-    secy = txsc->sc_common.secy;
-    if (!secy) {
-        return -ROCKER_EINVAL;
-    }
-    ctx.secy = secy;
-    fill_ctx(&ctx, iov, iovcnt, secy, data_offset);
-
-    ctx.sa = (SACommon *)txsc->txa[txsc->encoding_sa];
-    if (!ctx.sa) {
-        return -ROCKER_EINVAL;
-    }
-
-    if (secy_encrypt(&ctx)) {
-        return -ROCKER_EINVAL;
-    }
-
+    /* via Uncontrolled Port not associated with any SecY entity */
     return ROCKER_OK;
 }
 
