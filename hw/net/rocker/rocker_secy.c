@@ -298,7 +298,7 @@ static void gcm_aes_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
     memcpy(&iv[8], &pn, 4);
 }
 
-static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
+static int gcm_aes_set_nonce(CipherSuite *cs, SecYContext *ctx)
 {
     uint8_t iv[12];
     size_t in_len, tag_len;
@@ -331,7 +331,7 @@ static int gcm_aes_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
     return 0;
 }
 
-static int gcm_aes_128_decrypt(CipherSuite *cs, SecYContext *ctx)
+static int gcm_aes_decrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
     struct iovec out_iovec;
@@ -373,7 +373,7 @@ err_out:
     return -ROCKER_SECY_CRYPTO_ERR;
 }
 
-static int gcm_aes_128_encrypt(CipherSuite *cs, SecYContext *ctx)
+static int gcm_aes_encrypt(CipherSuite *cs, SecYContext *ctx)
 {
     int ret;
     int unsec_len, sec_len, tag_len;
@@ -420,21 +420,6 @@ err_out:
     return -ROCKER_SECY_CRYPTO_ERR;
 }
 
-static int gcm_aes_256_set_nonce(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
-static int gcm_aes_256_decrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
-static int gcm_aes_256_encrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
 static void gcm_aes_xpn_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
 {
 }
@@ -476,9 +461,9 @@ static CipherSuite ciphersuites[] = { {
     .confidentiality_protection = true,
     .icv_len                    = 16,
     .fill_iv                    = gcm_aes_fill_iv,
-    .set_nonce                  = gcm_aes_128_set_nonce,
-    .decrypt                    = gcm_aes_128_decrypt,
-    .encrypt                    = gcm_aes_128_encrypt,
+    .set_nonce                  = gcm_aes_set_nonce,
+    .decrypt                    = gcm_aes_decrypt,
+    .encrypt                    = gcm_aes_encrypt,
 }, {
     .id                         = 0x0080C20001000002,
     .name                       = "GCM-AES-256",
@@ -486,9 +471,9 @@ static CipherSuite ciphersuites[] = { {
     .confidentiality_protection = true,
     .icv_len                    = 16,
     .fill_iv                    = gcm_aes_fill_iv,
-    .set_nonce                  = gcm_aes_256_set_nonce,
-    .decrypt                    = gcm_aes_256_decrypt,
-    .encrypt                    = gcm_aes_256_encrypt,
+    .set_nonce                  = gcm_aes_set_nonce,
+    .decrypt                    = gcm_aes_decrypt,
+    .encrypt                    = gcm_aes_encrypt,
 }, {
     .id                         = 0x0080C20001000003,
     .name                       = "GCM-AES-XPN-128",
