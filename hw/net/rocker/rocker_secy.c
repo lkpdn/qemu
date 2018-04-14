@@ -190,6 +190,7 @@ typedef struct ciphersuite {
     bool integrity_protection;
     bool confidentiality_protection;
     int icv_len;
+    uint8_t salt[12];
     int (*set_nonce)(CipherSuite *cs, SecYContext *ctx);
     int (*decrypt)(CipherSuite *cs, SecYContext *ctx);
     int (*encrypt)(CipherSuite *cs, SecYContext *ctx);
