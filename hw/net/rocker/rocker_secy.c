@@ -444,26 +444,6 @@ static void gcm_aes_xpn_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
     memcpy(&iv[4], &high, 8);
 }
 
-static int gcm_aes_xpn_128_decrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
-static int gcm_aes_xpn_128_encrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
-static int gcm_aes_xpn_256_decrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
-static int gcm_aes_xpn_256_encrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
 static CipherSuite ciphersuites[] = { {
     .id                         = 0x0080C20001000001,
     .name                       = "GCM-AES-128",
@@ -495,8 +475,8 @@ static CipherSuite ciphersuites[] = { {
     .sak_len                    = 16,
     .fill_iv                    = gcm_aes_xpn_fill_iv,
     .set_nonce                  = gcm_aes_set_nonce,
-    .decrypt                    = gcm_aes_xpn_128_decrypt,
-    .encrypt                    = gcm_aes_xpn_128_encrypt,
+    .decrypt                    = gcm_aes_decrypt,
+    .encrypt                    = gcm_aes_encrypt,
 }, {
     .id                         = 0x0080C20001000004,
     .name                       = "GCM-AES-XPN-256",
@@ -506,8 +486,8 @@ static CipherSuite ciphersuites[] = { {
     .sak_len                    = 32,
     .fill_iv                    = gcm_aes_xpn_fill_iv,
     .set_nonce                  = gcm_aes_set_nonce,
-    .decrypt                    = gcm_aes_xpn_256_decrypt,
-    .encrypt                    = gcm_aes_xpn_256_encrypt,
+    .decrypt                    = gcm_aes_decrypt,
+    .encrypt                    = gcm_aes_encrypt,
 } };
 
 static CipherSuite *find_ciphersuite(cipher_id_t cipher_id)
