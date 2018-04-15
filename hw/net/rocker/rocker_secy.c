@@ -443,22 +443,12 @@ static void gcm_aes_xpn_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
     memcpy(&iv[4], &high, 8);
 }
 
-static int gcm_aes_xpn_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
 static int gcm_aes_xpn_128_decrypt(CipherSuite *cs, SecYContext *ctx)
 {
     return ROCKER_SECY_CRYPTO_OK;
 }
 
 static int gcm_aes_xpn_128_encrypt(CipherSuite *cs, SecYContext *ctx)
-{
-    return ROCKER_SECY_CRYPTO_OK;
-}
-
-static int gcm_aes_xpn_256_set_nonce(CipherSuite *cs, SecYContext *ctx)
 {
     return ROCKER_SECY_CRYPTO_OK;
 }
@@ -500,7 +490,7 @@ static CipherSuite ciphersuites[] = { {
     .confidentiality_protection = true,
     .icv_len                    = 16,
     .fill_iv                    = gcm_aes_xpn_fill_iv,
-    .set_nonce                  = gcm_aes_xpn_128_set_nonce,
+    .set_nonce                  = gcm_aes_set_nonce,
     .decrypt                    = gcm_aes_xpn_128_decrypt,
     .encrypt                    = gcm_aes_xpn_128_encrypt,
 }, {
@@ -510,7 +500,7 @@ static CipherSuite ciphersuites[] = { {
     .confidentiality_protection = true,
     .icv_len                    = 16,
     .fill_iv                    = gcm_aes_xpn_fill_iv,
-    .set_nonce                  = gcm_aes_xpn_256_set_nonce,
+    .set_nonce                  = gcm_aes_set_nonce,
     .decrypt                    = gcm_aes_xpn_256_decrypt,
     .encrypt                    = gcm_aes_xpn_256_encrypt,
 } };
