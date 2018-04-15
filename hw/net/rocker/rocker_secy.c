@@ -36,6 +36,7 @@
 #define MI_LEN 12
 
 typedef uint64_t sci_t;
+typedef uint32_t ssci_t;
 
 static GHashTable *fdb_table;
 
@@ -107,6 +108,7 @@ typedef struct rx_sa {
 
 typedef struct sc_common {
     sci_t sci;
+    ssci_t ssci; /* used iff. GCM-AES-XPN */
     bool is_tx;
 
     int64_t created_time;
@@ -1328,6 +1330,7 @@ static int secy_sc_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     SecY *secy;
     sci_t sci;
     sci_t tx_sci;
+    SCCommon *sc;
 
     if (!tlvs[ROCKER_TLV_SECY_PPORT] ||
         !tlvs[ROCKER_TLV_SECY_SCI] ||
@@ -1357,10 +1360,15 @@ static int secy_sc_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
         secy->pport = rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_PPORT]);
 
         if (sci == tx_sci) {
-            txsc_add(tbl, sci, secy);
+            sc = txsc_add(tbl, sci, secy);
         } else {
-            rxsc_add(tbl, sci, tx_sci, secy);
+            sc = rxsc_add(tbl, sci, tx_sci, secy);
         }
+
+        if (tlvs[ROCKER_TLV_SECY_SSCI]) {
+            sc->ssci = (ssci_t)rocker_tlv_get_le32(tlvs[ROCKER_TLV_SECY_SSCI]);
+        }
+
         notify_secy(secy);
         return -ROCKER_OK;
     case ROCKER_TLV_CMD_TYPE_SECY_DEL_TX_SC:
