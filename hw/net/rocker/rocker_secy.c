@@ -192,6 +192,7 @@ typedef struct ciphersuite {
     bool integrity_protection;
     bool confidentiality_protection;
     int icv_len;
+    int sak_len;
     uint8_t salt[12];
     void (*fill_iv)(CipherSuite *cs, SecYContext *ctx, uint8_t *iv);
     int (*set_nonce)(CipherSuite *cs, SecYContext *ctx);
@@ -469,6 +470,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .sak_len                    = 16,
     .fill_iv                    = gcm_aes_fill_iv,
     .set_nonce                  = gcm_aes_set_nonce,
     .decrypt                    = gcm_aes_decrypt,
@@ -479,6 +481,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .sak_len                    = 32,
     .fill_iv                    = gcm_aes_fill_iv,
     .set_nonce                  = gcm_aes_set_nonce,
     .decrypt                    = gcm_aes_decrypt,
@@ -489,6 +492,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .sak_len                    = 16,
     .fill_iv                    = gcm_aes_xpn_fill_iv,
     .set_nonce                  = gcm_aes_set_nonce,
     .decrypt                    = gcm_aes_xpn_128_decrypt,
@@ -499,6 +503,7 @@ static CipherSuite ciphersuites[] = { {
     .integrity_protection       = true,
     .confidentiality_protection = true,
     .icv_len                    = 16,
+    .sak_len                    = 32,
     .fill_iv                    = gcm_aes_xpn_fill_iv,
     .set_nonce                  = gcm_aes_set_nonce,
     .decrypt                    = gcm_aes_xpn_256_decrypt,
@@ -529,7 +534,16 @@ static QCryptoAead *alloc_cipher_context(cipher_id_t cipher_id,
     cs = find_ciphersuite(cipher_id);
     if (cs) {
         DPRINTF("Cipher Suite \"%s\" is initialised.\n", cs->name);
-        alg = QCRYPTO_CIPHER_ALG_AES_128;
+        switch (cs->sak_len) {
+        case 16:
+            alg = QCRYPTO_CIPHER_ALG_AES_128;
+            break;
+        case 32:
+            alg = QCRYPTO_CIPHER_ALG_AES_256;
+            break;
+        default:
+            return NULL;
+        }
         mode = QCRYPTO_CIPHER_MODE_GCM;
         nkey = qcrypto_cipher_get_key_len(alg);
         return qcrypto_aead_new(alg, mode, key, nkey, &err);
