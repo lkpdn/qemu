@@ -679,14 +679,14 @@ static SecY *secy_find(SCITable *sci_table, sci_t sci)
     return NULL;
 }
 
-static int txsc_add(SCITable *sci_table, sci_t sci, SecY *secy)
+static SCCommon *txsc_add(SCITable *sci_table, sci_t sci, SecY *secy)
 {
     TxSC *tx_sc;
 
     tx_sc = txsc_find(sci_table, sci);
     if (tx_sc)
         /* TODO: maybe we better to reset some params to default */
-        return 0;
+        return &tx_sc->sc_common;
 
     tx_sc = g_new0(TxSC, 1);
     tx_sc->sc_common.sci = sci;
@@ -697,17 +697,17 @@ static int txsc_add(SCITable *sci_table, sci_t sci, SecY *secy)
     secy->tx_sc = tx_sc;
 
     g_hash_table_insert(sci_table->tbl, &(tx_sc->sc_common.sci), tx_sc);
-    return 0;
+    return &tx_sc->sc_common;
 }
 
-static int rxsc_add(SCITable *sci_table, sci_t sci, sci_t tx_sci, SecY *secy)
+static SCCommon *rxsc_add(SCITable *sci_table, sci_t sci, sci_t tx_sci, SecY *secy)
 {
     RxSC *rx_sc;
 
     rx_sc = rxsc_find(sci_table, sci);
     if (rx_sc)
         /* TODO: maybe we better to reset some params to default */
-        return 0;
+        return &rx_sc->sc_common;
 
     rx_sc = g_new0(RxSC, 1);
     rx_sc->sc_common.sci = sci;
@@ -719,7 +719,7 @@ static int rxsc_add(SCITable *sci_table, sci_t sci, sci_t tx_sci, SecY *secy)
     rx_sc->sc_common.secy = secy;
 
     g_hash_table_insert(sci_table->tbl, &(rx_sc->sc_common.sci), rx_sc);
-    return 0;
+    return &rx_sc->sc_common;
 }
 
 static void txsc_del(SCITable *sci_table, sci_t sci)
