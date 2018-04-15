@@ -424,6 +424,23 @@ err_out:
 
 static void gcm_aes_xpn_fill_iv(CipherSuite *cs, SecYContext *ctx, uint8_t *iv)
 {
+    uint32_t low, low_salt;
+    uint64_t high, high_salt;
+    SCCommon *sc;
+
+    sc = g_hash_table_lookup(ctx->sci_table->tbl, &ctx->sci);
+    if (!sc) {
+        return;
+    }
+
+    memcpy(&low_salt, ctx->secy->current_ciphersuite->salt, 4);
+    memcpy(&high_salt, &ctx->secy->current_ciphersuite->salt[4], 8);
+
+    low = sc->ssci ^ low_salt;
+    high = ctx->sectag->pn ^ high_salt;
+
+    memcpy(iv, &low, 4);
+    memcpy(&iv[4], &high, 8);
 }
 
 static int gcm_aes_xpn_128_set_nonce(CipherSuite *cs, SecYContext *ctx)
