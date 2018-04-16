@@ -1442,6 +1442,11 @@ static int secy_sak_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
     return -ROCKER_ENOTSUP;
 }
 
+static int secy_stat_cmd(SCITable *tbl, uint16_t cmd, RockerTlv **tlvs)
+{
+    return -ROCKER_ENOTSUP;
+}
+
 static int secy_cmd(World *world, struct desc_info *info,
                     char *buf, uint16_t cmd, RockerTlv *cmd_info_tlv)
 {
@@ -1468,6 +1473,9 @@ static int secy_cmd(World *world, struct desc_info *info,
 
     case ROCKER_TLV_CMD_TYPE_SECY_INSTALL_SAK:
         return secy_sak_cmd(sci_table, cmd, tlvs);
+
+    case ROCKER_TLV_CMD_TYPE_SECY_STAT:
+        return secy_stat_cmd(sci_table, cmd, tlvs);
 
     case ROCKER_TLV_CMD_TYPE_SECY_DEL:
         if (!tlvs[ROCKER_TLV_SECY_SCI])
