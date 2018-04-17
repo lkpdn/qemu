@@ -1121,6 +1121,19 @@ static void secy_ig(SecY *secy, SecYContext *ctx,
 
     fill_ctx(ctx, iov, iovcnt, secy, data_offset);
 
+    /* TODO: To keep data plane implementation as simple as possible, it might be
+     *       better to pass invalid MACsec frame up to the control plane, finally
+     *       delivered to its SecY Controlled Port with the frame perceived as
+     *       invalid *again*.
+     *
+     *       That would mean two 'Y' functions demultiplex receive indications on
+     *       the same frame, just to deliver an invalid frames up to the
+     *       targetted Controlled Port. Plus, we MUST NOT have our 'Y' function
+     *       deliver to Uncontrolled Port not associated to any SecY. Otherwise
+     *       duplicate frames would be delivered.
+     *
+     *       See: 802.1AE-2006 10.6.5 and 11.8
+     */
     if (secy_decrypt(ctx)) {
         secy_drop(ctx);
         return;
