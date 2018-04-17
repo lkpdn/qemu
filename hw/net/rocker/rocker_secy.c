@@ -162,6 +162,8 @@ typedef struct secy {
 #pragma pack(push, 1)
 typedef struct sectag {
     uint8_t tci_an;
+
+    /* Bits 7 and 8 shall be zero. No bit field for clarity. */
     uint8_t short_len;
     __be32 pn;
     __be64 sci;
